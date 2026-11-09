@@ -1,0 +1,9151 @@
+{
+ "meta": {
+  "started": "2026-11-09T19:22:26Z",
+  "harness": "lab/vibe/run.py",
+  "model": "claude-haiku-5-5",
+  "cli": "claude",
+  "effort": null,
+  "rounds": 5,
+  "seeds": [
+   0,
+   1
+  ],
+  "languages": [
+   "python"
+  ],
+  "tasks": [
+   "berth_sim",
+   "chain_relax",
+   "csv_rollup",
+   "dsl_calc",
+   "echo_pack",
+   "expense_split",
+   "gradebook",
+   "ini_merge",
+   "jsonl_stats",
+   "ledger_bin",
+   "log_levels",
+   "matrix_stats",
+   "rail_transfer",
+   "scar_life",
+   "tally_lang",
+   "term_rank",
+   "ticket_audit",
+   "todo_file",
+   "tree_fold",
+   "version_sort",
+   "word_freq"
+  ],
+  "jobs": 1,
+  "case_timeout": 90,
+  "mode": "python = CPython 3.12; rust = rustc -O --edition=2021; ail = AIL compile --syntax python; ail-strict = AIL with lab/vibe2/STRICT_SPEC.md; ail-new = lab/vibe2/NEW_SURFACE.md translated to AIL Python by lab/vibe2/translate.py",
+  "seed_note": "seed = independent repeated attempt; the CLI exposes no sampling seed",
+  "updated": "2026-11-09T19:49:24Z",
+  "stopped_early": false,
+  "completed_attempts": 42,
+  "scheduled_attempts": 42
+ },
+ "results": [
+  {
+   "task": "berth_sim",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 23,
+   "hidden": [
+    {
+     "name": "no_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_ship",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_cargo",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "setup_same_operator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "operator_memory_per_berth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "priority_then_arrival_then_id",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "small_berth_chooses_first",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "berth_number_order_within_class",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_ship_waits",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "depart_and_arrive_same_minute",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "ceil_division",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "extreme_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unsorted_input",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "wait_max_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_berths_few_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_busy",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_calm",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 1.38,
+   "final_run_seconds": 1.38,
+   "reply_tokens": 7466,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3770,
+     "reply_chars": 3477,
+     "reply_tokens": 7466,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 1.38
+    }
+   ],
+   "program": "programs3c/berth_sim/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "berth_sim",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 23,
+   "hidden": [
+    {
+     "name": "no_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_ship",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_cargo",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "setup_same_operator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "operator_memory_per_berth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "priority_then_arrival_then_id",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "small_berth_chooses_first",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "berth_number_order_within_class",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_ship_waits",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "depart_and_arrive_same_minute",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "ceil_division",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "extreme_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unsorted_input",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "wait_max_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_berths_few_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_busy",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_calm",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.082,
+   "final_run_seconds": 0.082,
+   "reply_tokens": 6236,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3770,
+     "reply_chars": 3403,
+     "reply_tokens": 6236,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.082
+    }
+   ],
+   "program": "programs3c/berth_sim/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "chain_relax",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 1,
+   "hidden_total": 29,
+   "hidden": [
+    {
+     "name": "two_elements",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "three_elements",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_sweep",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "two_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "seed_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "seed_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "medium",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_sweeps_small",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "odd_length",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "even_length",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "n_max_no_sweeps",
+     "status": "wrong_exit",
+     "exit": null,
+     "expected_exit": 0
+    },
+    {
+     "name": "t_max_tiny",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "n_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "t_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "seed_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "not_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_arg",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "four_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 7.702,
+   "final_run_seconds": 7.702,
+   "reply_tokens": 2581,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3372,
+     "reply_chars": 1916,
+     "reply_tokens": 2581,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 7.702
+    }
+   ],
+   "program": "programs3c/chain_relax/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "chain_relax",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 29,
+   "hidden": [
+    {
+     "name": "two_elements",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "three_elements",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_sweep",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "two_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "seed_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "seed_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "medium",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_sweeps_small",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "odd_length",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "even_length",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "n_max_no_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "t_max_tiny",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "n_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "t_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "seed_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "not_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_arg",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "four_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.073,
+   "final_run_seconds": 0.073,
+   "reply_tokens": 2698,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3372,
+     "reply_chars": 2064,
+     "reply_tokens": 2698,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.073
+    }
+   ],
+   "program": "programs3c/chain_relax/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "csv_rollup",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 6,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_mixed",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.075,
+   "final_run_seconds": 0.075,
+   "reply_tokens": 3651,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3568,
+     "reply_chars": 2315,
+     "reply_tokens": 3651,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.075
+    }
+   ],
+   "program": "programs3c/csv_rollup/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "csv_rollup",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 6,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_mixed",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.081,
+   "final_run_seconds": 0.081,
+   "reply_tokens": 3970,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3568,
+     "reply_chars": 2124,
+     "reply_tokens": 3970,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.081
+    }
+   ],
+   "program": "programs3c/csv_rollup/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "dsl_calc",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "whitespace",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "overflow_keeps_operands",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "clear_final",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "missing_args",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.317,
+   "final_run_seconds": 0.317,
+   "reply_tokens": 3406,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3054,
+     "reply_chars": 3479,
+     "reply_tokens": 3406,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.317
+    }
+   ],
+   "program": "programs3c/dsl_calc/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "dsl_calc",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "whitespace",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "overflow_keeps_operands",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "clear_final",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "missing_args",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.132,
+   "final_run_seconds": 0.132,
+   "reply_tokens": 3418,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3054,
+     "reply_chars": 3189,
+     "reply_tokens": 3418,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.132
+    }
+   ],
+   "program": "programs3c/dsl_calc/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "echo_pack",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 54,
+   "hidden": [
+    {
+     "name": "pack_empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_one_byte",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_four_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_five_same",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_zero_run",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_overlap_period3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_tail_short",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_literal_128",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_literal_257",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_hidden_long_match",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_visible_long_match",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_distance_limit",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_distance_just_inside",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_tie_largest_p",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_max_len_131",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_binary_all_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_empty_stream",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_zero_run",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_custom_valid",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_overlap_dist1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_empty_input",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_bad_magic",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_short_length",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_truncated_literal",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_truncated_distance",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_dist_zero",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_dist_too_far",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_copy_too_long",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_literal_too_long",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_missing_hash",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_trailing_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_length_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_length_zero_with_token",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_mode",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "pack_random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_corrupt0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt1",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt3",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    }
+   ],
+   "loop_seconds": 0.124,
+   "final_run_seconds": 0.124,
+   "reply_tokens": 4075,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4548,
+     "reply_chars": 3521,
+     "reply_tokens": 4075,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.124
+    }
+   ],
+   "program": "programs3c/echo_pack/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "echo_pack",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 54,
+   "hidden": [
+    {
+     "name": "pack_empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_one_byte",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_four_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_five_same",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_zero_run",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_overlap_period3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_tail_short",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_literal_128",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_literal_257",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_hidden_long_match",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_visible_long_match",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_distance_limit",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_distance_just_inside",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_tie_largest_p",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_max_len_131",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_binary_all_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_empty_stream",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_zero_run",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_custom_valid",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_overlap_dist1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_empty_input",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_bad_magic",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_short_length",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_truncated_literal",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_truncated_distance",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_dist_zero",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_dist_too_far",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_copy_too_long",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_literal_too_long",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_missing_hash",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_trailing_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_length_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_length_zero_with_token",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_mode",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "pack_random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_corrupt0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt1",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt3",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    }
+   ],
+   "loop_seconds": 0.073,
+   "final_run_seconds": 0.073,
+   "reply_tokens": 4283,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4548,
+     "reply_chars": 3366,
+     "reply_tokens": 4283,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.073
+    }
+   ],
+   "program": "programs3c/echo_pack/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "expense_split",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_amount",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_participant",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_remainder",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_sum",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.194,
+   "final_run_seconds": 0.194,
+   "reply_tokens": 1912,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2430,
+     "reply_chars": 1398,
+     "reply_tokens": 1912,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.194
+    }
+   ],
+   "program": "programs3c/expense_split/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "expense_split",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_amount",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_participant",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_remainder",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_sum",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.137,
+   "final_run_seconds": 0.137,
+   "reply_tokens": 1899,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2430,
+     "reply_chars": 1309,
+     "reply_tokens": 1899,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.137
+    }
+   ],
+   "program": "programs3c/expense_split/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "gradebook",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "floor",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_sums",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_rows",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.358,
+   "final_run_seconds": 0.358,
+   "reply_tokens": 1964,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 1845,
+     "reply_chars": 1466,
+     "reply_tokens": 1964,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.358
+    }
+   ],
+   "program": "programs3c/gradebook/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "gradebook",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "floor",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_sums",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_rows",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.145,
+   "final_run_seconds": 0.145,
+   "reply_tokens": 1657,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 1845,
+     "reply_chars": 1235,
+     "reply_tokens": 1657,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.145
+    }
+   ],
+   "program": "programs3c/gradebook/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "ini_merge",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "default_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_sections",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "spaces_in_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.288,
+   "final_run_seconds": 0.288,
+   "reply_tokens": 1999,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2359,
+     "reply_chars": 1313,
+     "reply_tokens": 1999,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.288
+    }
+   ],
+   "program": "programs3c/ini_merge/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "ini_merge",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "default_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_sections",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "spaces_in_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.064,
+   "final_run_seconds": 0.064,
+   "reply_tokens": 2393,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2359,
+     "reply_chars": 1225,
+     "reply_tokens": 2393,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.064
+    }
+   ],
+   "program": "programs3c/ini_merge/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "jsonl_stats",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "escapes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_users",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_tag_and_default",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.48,
+   "final_run_seconds": 0.48,
+   "reply_tokens": 2350,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2196,
+     "reply_chars": 2010,
+     "reply_tokens": 2350,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.48
+    }
+   ],
+   "program": "programs3c/jsonl_stats/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "jsonl_stats",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "escapes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_users",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_tag_and_default",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.076,
+   "final_run_seconds": 0.076,
+   "reply_tokens": 2272,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2196,
+     "reply_chars": 1871,
+     "reply_tokens": 2272,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.076
+    }
+   ],
+   "program": "programs3c/jsonl_stats/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "ledger_bin",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "header_only_strict",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_file",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "short_header",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_magic",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_version",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_flags",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_opcode_0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_opcode_6",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_padding",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_zero_padding_id",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_5_bytes_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "varint_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_6_bytes",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_long_valid_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "truncated_in_varint",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_before_check",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_name_len",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_in_name",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_zero",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_33",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_32",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "name_with_space",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_bad_byte_before_truncation",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_del_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "note_truncated",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "note_empty_and_binary",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "check_wrong",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "structural_after_strict_reject",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "strict_no_rejection",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "strict_funds",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "strict_self",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "strict_dup_of_shut",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "reject_order",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "move_exact_balance",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "shut_keeps_balance",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_ties",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_excludes_shut",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_shut",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "extreme_ids_amounts",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reject_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "corrupt0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt1",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt3",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "cut_short",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    }
+   ],
+   "loop_seconds": 0.1,
+   "final_run_seconds": 0.1,
+   "reply_tokens": 6117,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6742,
+     "reply_chars": 5384,
+     "reply_tokens": 6117,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.1
+    }
+   ],
+   "program": "programs3c/ledger_bin/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "ledger_bin",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "header_only_strict",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_file",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "short_header",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_magic",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_version",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_flags",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_opcode_0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_opcode_6",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_padding",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_zero_padding_id",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_5_bytes_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "varint_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_6_bytes",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_long_valid_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "truncated_in_varint",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_before_check",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_name_len",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_in_name",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_zero",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_33",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_32",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "name_with_space",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_bad_byte_before_truncation",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_del_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "note_truncated",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "note_empty_and_binary",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "check_wrong",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "structural_after_strict_reject",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "strict_no_rejection",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "strict_funds",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "strict_self",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "strict_dup_of_shut",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "reject_order",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "move_exact_balance",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "shut_keeps_balance",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_ties",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_excludes_shut",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_shut",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "extreme_ids_amounts",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reject_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "corrupt0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt1",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt3",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "cut_short",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    }
+   ],
+   "loop_seconds": 0.066,
+   "final_run_seconds": 0.066,
+   "reply_tokens": 5437,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6742,
+     "reply_chars": 5618,
+     "reply_tokens": 5437,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.066
+    }
+   ],
+   "program": "programs3c/ledger_bin/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "log_levels",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_message",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_line",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_levels",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_spaces",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.246,
+   "final_run_seconds": 0.246,
+   "reply_tokens": 1016,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2027,
+     "reply_chars": 1391,
+     "reply_tokens": 1016,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.246
+    }
+   ],
+   "program": "programs3c/log_levels/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "log_levels",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_message",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_line",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_levels",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_spaces",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.105,
+   "final_run_seconds": 0.105,
+   "reply_tokens": 1066,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2027,
+     "reply_chars": 1383,
+     "reply_tokens": 1066,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.105
+    }
+   ],
+   "program": "programs3c/log_levels/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "matrix_stats",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 18,
+   "hidden": [
+    {
+     "name": "empty_input",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "zero_by_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_cols",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_rows",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_row_sum",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "bad_header",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "too_many_rows",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "too_few_cols",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_number",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "overflow_value",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 1.015,
+   "final_run_seconds": 1.015,
+   "reply_tokens": 4043,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2030,
+     "reply_chars": 2050,
+     "reply_tokens": 4043,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 1.015
+    }
+   ],
+   "program": "programs3c/matrix_stats/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "matrix_stats",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 18,
+   "hidden": [
+    {
+     "name": "empty_input",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "zero_by_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_cols",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_rows",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_row_sum",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "bad_header",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "too_many_rows",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "too_few_cols",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_number",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "overflow_value",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.148,
+   "final_run_seconds": 0.148,
+   "reply_tokens": 2862,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2030,
+     "reply_chars": 1892,
+     "reply_tokens": 2862,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.148
+    }
+   ],
+   "program": "programs3c/matrix_stats/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "rail_transfer",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 21,
+   "hidden": [
+    {
+     "name": "no_queries",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_segments",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "single_station",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "isolated_station",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "stay_on_line_back_and_forth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "transfer_cost_at_start_free",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_times",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "parallel_segments",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "same_line_rejoin",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "fewer_boardings_win_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "self_loops_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_numbers",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "line_ids_sparse",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_medium",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_zero_xfer",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.077,
+   "final_run_seconds": 0.077,
+   "reply_tokens": 6633,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2767,
+     "reply_chars": 3073,
+     "reply_tokens": 6633,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.077
+    }
+   ],
+   "program": "programs3c/rail_transfer/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "rail_transfer",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 21,
+   "hidden": [
+    {
+     "name": "no_queries",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_segments",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "single_station",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "isolated_station",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "stay_on_line_back_and_forth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "transfer_cost_at_start_free",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_times",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "parallel_segments",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "same_line_rejoin",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "fewer_boardings_win_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "self_loops_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_numbers",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "line_ids_sparse",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_medium",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_zero_xfer",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.068,
+   "final_run_seconds": 0.068,
+   "reply_tokens": 9747,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2767,
+     "reply_chars": 3069,
+     "reply_tokens": 9747,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.068
+    }
+   ],
+   "program": "programs3c/rail_transfer/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "scar_life",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 50,
+   "hidden": [
+    {
+     "name": "gens_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "gens_leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_rule",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "born_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_codes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "high_codes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_dead",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_alive_stays",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_alive_dies",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "width_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "height_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "width_two",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "two_by_two",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "torus_wrap",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "scars_block_birth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_a",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_b",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_c",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_d",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_e",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "gens_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "rule_lowercase",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_lower_code",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_repeat",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_code_D",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_missing_slash",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_extra",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_swapped",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_plus",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_empty",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "three_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_input",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_leading_zero",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_zero",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_two_spaces",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "short_row",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "long_row",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "too_few_rows",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "too_many_rows",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "trailing_empty_line",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_char_x",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_char_O",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "max_width_row",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.081,
+   "final_run_seconds": 0.081,
+   "reply_tokens": 5413,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3604,
+     "reply_chars": 2598,
+     "reply_tokens": 5413,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.081
+    }
+   ],
+   "program": "programs3c/scar_life/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "scar_life",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 50,
+   "hidden": [
+    {
+     "name": "gens_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "gens_leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_rule",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "born_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_codes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "high_codes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_dead",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_alive_stays",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_alive_dies",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "width_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "height_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "width_two",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "two_by_two",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "torus_wrap",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "scars_block_birth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_a",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_b",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_c",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_d",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_e",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "gens_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "rule_lowercase",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_lower_code",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_repeat",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_code_D",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_missing_slash",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_extra",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_swapped",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_plus",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_empty",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "three_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_input",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_leading_zero",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_zero",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_two_spaces",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "short_row",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "long_row",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "too_few_rows",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "too_many_rows",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "trailing_empty_line",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_char_x",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_char_O",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "max_width_row",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.094,
+   "final_run_seconds": 0.094,
+   "reply_tokens": 4302,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3604,
+     "reply_chars": 2501,
+     "reply_tokens": 4302,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.094
+    }
+   ],
+   "program": "programs3c/scar_life/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "tally_lang",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 72,
+   "hidden": [
+    {
+     "name": "empty_file",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_comments",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf_and_tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "wraparound",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "rotate",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_ops",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "precedence",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "comparison_chain_error",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "comparison_chain_error2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "longest_match",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "longest_match2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "not_equal_token",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "keyword_as_name",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "keyword_in_expr",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "keyword_prefix_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "number_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "number_then_word",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "uppercase",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_char",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_byte_in_comment",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "nul_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "line_1000",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "line_1001",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "long_comment_line",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "trailing_tokens",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "set_double_equals",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "set_missing_expr",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "out_trailing_comma",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "out_empty",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "else_without_when",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "double_else",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "stray_end",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unclosed_blocks",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "break_outside_loop",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "break_in_when_in_loop",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "nesting_16",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "nesting_17",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "parens_32",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "parens_33",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "parens_sequential",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unbalanced_paren",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "long_unary_chain",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "undefined_var",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "div_zero_in_loop",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "mod_zero",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "runtime_error_in_when_header",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "runtime_error_in_loop_header",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "parse_error_beats_runtime",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "parse_error_after_unclosed",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "no_short_circuit",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "loop_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "loop_count_once",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "else_branch",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_bodies",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "global_vars",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "missing_file",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random6",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random7",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random8",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random9",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random10",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random11",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    }
+   ],
+   "loop_seconds": 0.114,
+   "final_run_seconds": 0.114,
+   "reply_tokens": 20251,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6883,
+     "reply_chars": 8650,
+     "reply_tokens": 20251,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.114
+    }
+   ],
+   "program": "programs3c/tally_lang/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "tally_lang",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 72,
+   "hidden": [
+    {
+     "name": "empty_file",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_comments",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf_and_tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "wraparound",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "rotate",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_ops",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "precedence",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "comparison_chain_error",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "comparison_chain_error2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "longest_match",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "longest_match2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "not_equal_token",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "keyword_as_name",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "keyword_in_expr",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "keyword_prefix_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "number_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "number_then_word",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "uppercase",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_char",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_byte_in_comment",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "nul_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "line_1000",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "line_1001",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "long_comment_line",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "trailing_tokens",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "set_double_equals",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "set_missing_expr",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "out_trailing_comma",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "out_empty",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "else_without_when",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "double_else",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "stray_end",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unclosed_blocks",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "break_outside_loop",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "break_in_when_in_loop",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "nesting_16",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "nesting_17",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "parens_32",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "parens_33",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "parens_sequential",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unbalanced_paren",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "long_unary_chain",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "undefined_var",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "div_zero_in_loop",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "mod_zero",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "runtime_error_in_when_header",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "runtime_error_in_loop_header",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "parse_error_beats_runtime",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "parse_error_after_unclosed",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "no_short_circuit",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "loop_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "loop_count_once",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "else_branch",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_bodies",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "global_vars",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "missing_file",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random6",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random7",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random8",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random9",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random10",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random11",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    }
+   ],
+   "loop_seconds": 0.087,
+   "final_run_seconds": 0.087,
+   "reply_tokens": 18609,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6883,
+     "reply_chars": 9695,
+     "reply_tokens": 18609,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.087
+    }
+   ],
+   "program": "programs3c/tally_lang/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "term_rank",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 40,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_separator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "separators_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "not_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "cr_separator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "joiners",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "joiner_digits",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "number_terms",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "stop_words",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "suffix_rules",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "suffix_after_join",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "short_tokens",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "non_ascii_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "control_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "ties_bytewise",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_order",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_plus",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_empty",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_not_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_docs_between",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "df_effect",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_tf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random6",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random7",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random8",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random9",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.105,
+   "final_run_seconds": 0.105,
+   "reply_tokens": 4713,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4807,
+     "reply_chars": 3101,
+     "reply_tokens": 4713,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.105
+    }
+   ],
+   "program": "programs3c/term_rank/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "term_rank",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 40,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_separator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "separators_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "not_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "cr_separator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "joiners",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "joiner_digits",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "number_terms",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "stop_words",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "suffix_rules",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "suffix_after_join",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "short_tokens",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "non_ascii_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "control_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "ties_bytewise",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_order",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_plus",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_empty",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_not_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_docs_between",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "df_effect",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_tf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random6",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random7",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random8",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random9",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.064,
+   "final_run_seconds": 0.064,
+   "reply_tokens": 4230,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4807,
+     "reply_chars": 2980,
+     "reply_tokens": 4230,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.064
+    }
+   ],
+   "program": "programs3c/term_rank/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "ticket_audit",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 88,
+   "hidden": [
+    {
+     "name": "valid_no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_header_and_end",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_file",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "header_wrong",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "header_crlf",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "header_only_no_newline",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "missing_end",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "line_after_end",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "empty_line_after_end",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "end_count_wrong",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "end_cents_wrong",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "end_leading_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "end_bad_syntax",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "end_extra_field",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "empty_record_line",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "unknown_type",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "lowercase_type",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "too_few_fields",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "too_many_fields",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "crlf_record",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "tab_in_name",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "name_leading_space",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "name_trailing_space",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "name_inner_spaces_ok",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "name_40",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "name_41",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "name_non_ascii",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "code_lowercase",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "code_4_letters",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "capacity_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "capacity_leading_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "capacity_too_big",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "capacity_max",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "capacity_7_digits",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "venue_duplicate",
+     "status": "pass",
+     "exit": 6,
+     "expected_exit": 6
+    },
+    {
+     "name": "event_check_digit",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "event_5_digits",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "event_unknown_venue",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "event_duplicate",
+     "status": "pass",
+     "exit": 6,
+     "expected_exit": 6
+    },
+    {
+     "name": "event_unknown_venue_and_duplicate",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "syntax_before_value",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "value_before_reference",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "leap_day_ok",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "leap_2000_ok",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "year_2100",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "year_1999",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "month_13",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "day_31_april",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "day_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "hour_24",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "minute_60",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "time_one_digit",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "price_not_multiple_5",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "price_leading_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "price_zero_whole_ok",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "price_one_decimal",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "price_five_digits",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "seat_leading_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "seat_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "seat_4_digits",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "seat_lowercase",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "buyer_short",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "buyer_long",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "buyer_digit_first",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "buyer_upper",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "sale_unknown_event",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "sale_bad_check_digit",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "sale_duplicate_seat",
+     "status": "pass",
+     "exit": 6,
+     "expected_exit": 6
+    },
+    {
+     "name": "sale_duplicate_beats_capacity",
+     "status": "pass",
+     "exit": 6,
+     "expected_exit": 6
+    },
+    {
+     "name": "refund_unsold_seat",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "refund_unknown_event",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "refund_twice",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "missing_file",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "resell_after_refund",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_ties_and_unused_venue",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "mutated0",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "mutated1",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "mutated2",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "mutated3",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    }
+   ],
+   "loop_seconds": 0.086,
+   "final_run_seconds": 0.086,
+   "reply_tokens": 10917,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6012,
+     "reply_chars": 6070,
+     "reply_tokens": 10917,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.086
+    }
+   ],
+   "program": "programs3c/ticket_audit/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "ticket_audit",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 88,
+   "hidden": [
+    {
+     "name": "valid_no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_header_and_end",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_file",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "header_wrong",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "header_crlf",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "header_only_no_newline",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "missing_end",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "line_after_end",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "empty_line_after_end",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "end_count_wrong",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "end_cents_wrong",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "end_leading_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "end_bad_syntax",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "end_extra_field",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "empty_record_line",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "unknown_type",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "lowercase_type",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "too_few_fields",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "too_many_fields",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "crlf_record",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "tab_in_name",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "name_leading_space",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "name_trailing_space",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "name_inner_spaces_ok",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "name_40",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "name_41",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "name_non_ascii",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "code_lowercase",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "code_4_letters",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "capacity_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "capacity_leading_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "capacity_too_big",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "capacity_max",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "capacity_7_digits",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "venue_duplicate",
+     "status": "pass",
+     "exit": 6,
+     "expected_exit": 6
+    },
+    {
+     "name": "event_check_digit",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "event_5_digits",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "event_unknown_venue",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "event_duplicate",
+     "status": "pass",
+     "exit": 6,
+     "expected_exit": 6
+    },
+    {
+     "name": "event_unknown_venue_and_duplicate",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "syntax_before_value",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "value_before_reference",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "leap_day_ok",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "leap_2000_ok",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "year_2100",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "year_1999",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "month_13",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "day_31_april",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "day_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "hour_24",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "minute_60",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "time_one_digit",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "price_not_multiple_5",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "price_leading_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "price_zero_whole_ok",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "price_one_decimal",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "price_five_digits",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "seat_leading_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "seat_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "seat_4_digits",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "seat_lowercase",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "buyer_short",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "buyer_long",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "buyer_digit_first",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "buyer_upper",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "sale_unknown_event",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "sale_bad_check_digit",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "sale_duplicate_seat",
+     "status": "pass",
+     "exit": 6,
+     "expected_exit": 6
+    },
+    {
+     "name": "sale_duplicate_beats_capacity",
+     "status": "pass",
+     "exit": 6,
+     "expected_exit": 6
+    },
+    {
+     "name": "refund_unsold_seat",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "refund_unknown_event",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "refund_twice",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "missing_file",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "resell_after_refund",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_ties_and_unused_venue",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "mutated0",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "mutated1",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "mutated2",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "mutated3",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    }
+   ],
+   "loop_seconds": 0.087,
+   "final_run_seconds": 0.087,
+   "reply_tokens": 9619,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6012,
+     "reply_chars": 6509,
+     "reply_tokens": 9619,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.087
+    }
+   ],
+   "program": "programs3c/ticket_audit/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "todo_file",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_newlines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reuse_after_remove",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "id_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "sort_numeric",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_text_trailing",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_len",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.474,
+   "final_run_seconds": 0.474,
+   "reply_tokens": 4424,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2838,
+     "reply_chars": 3319,
+     "reply_tokens": 4424,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.474
+    }
+   ],
+   "program": "programs3c/todo_file/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "todo_file",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 1,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_newlines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf_text",
+     "status": "silent_wrong",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reuse_after_remove",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "id_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "sort_numeric",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_text_trailing",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_len",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.077,
+   "final_run_seconds": 0.077,
+   "reply_tokens": 5086,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2838,
+     "reply_chars": 3100,
+     "reply_tokens": 5086,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.077
+    }
+   ],
+   "program": "programs3c/todo_file/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "tree_fold",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [
+    {
+     "name": "tree_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "single_node",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "root_chain_fold",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "fold_two_chains",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "fold_root_single_child",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "fold_then_cut_then_fold",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "fold_names_with_plus",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "sort_ties",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "sort_prefix_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prune_boundary",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prune_root_kept",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prune_uses_old_sums",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "cut_root",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "cut_missing",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "cut_leaf_and_inner",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "find_preorder_first",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "levels",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_weights",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "max_name",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "deep_chain",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "wide",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_input",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_line_op",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "trailing_blank_line",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "name_too_long",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "name_uppercase",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "weight_leading_zero",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "weight_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "weight_missing",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_spaces",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "space_after_bracket",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "unclosed",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "extra_close",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_roots",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "unknown_op",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "op_missing_arg",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "op_extra_arg",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "op_bad_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "op_number_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "op_trailing_space",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "find_bad_name",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "error_after_output_ops",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random6",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random7",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.127,
+   "final_run_seconds": 0.127,
+   "reply_tokens": 17488,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4574,
+     "reply_chars": 6320,
+     "reply_tokens": 17488,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.127
+    }
+   ],
+   "program": "programs3c/tree_fold/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "tree_fold",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [
+    {
+     "name": "tree_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "single_node",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "root_chain_fold",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "fold_two_chains",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "fold_root_single_child",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "fold_then_cut_then_fold",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "fold_names_with_plus",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "sort_ties",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "sort_prefix_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prune_boundary",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prune_root_kept",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prune_uses_old_sums",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "cut_root",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "cut_missing",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "cut_leaf_and_inner",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "find_preorder_first",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "levels",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_weights",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "max_name",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "deep_chain",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "wide",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_input",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_line_op",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "trailing_blank_line",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "name_too_long",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "name_uppercase",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "weight_leading_zero",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "weight_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "weight_missing",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_spaces",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "space_after_bracket",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "unclosed",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "extra_close",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_roots",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "unknown_op",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "op_missing_arg",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "op_extra_arg",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "op_bad_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "op_number_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "op_trailing_space",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "find_bad_name",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "error_after_output_ops",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random6",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random7",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.082,
+   "final_run_seconds": 0.082,
+   "reply_tokens": 19521,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4574,
+     "reply_chars": 6818,
+     "reply_tokens": 19521,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.082
+    }
+   ],
+   "program": "programs3c/tree_fold/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "version_sort",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "numeric_vs_alpha",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_fewer",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "equal_precedence_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.438,
+   "final_run_seconds": 0.438,
+   "reply_tokens": 3873,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2462,
+     "reply_chars": 2214,
+     "reply_tokens": 3873,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.438
+    }
+   ],
+   "program": "programs3c/version_sort/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "version_sort",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "numeric_vs_alpha",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_fewer",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "equal_precedence_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.094,
+   "final_run_seconds": 0.094,
+   "reply_tokens": 2813,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2462,
+     "reply_chars": 1757,
+     "reply_tokens": 2813,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.094
+    }
+   ],
+   "program": "programs3c/version_sort/python-1.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "word_freq",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "apostrophes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "digits_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top20_cutoff",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "repeat_many",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "mixed_case",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.301,
+   "final_run_seconds": 0.301,
+   "reply_tokens": 749,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 1512,
+     "reply_chars": 585,
+     "reply_tokens": 749,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.301
+    }
+   ],
+   "program": "programs3c/word_freq/python-0.py",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "task": "word_freq",
+   "lang": "python",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "apostrophes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "digits_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top20_cutoff",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "repeat_many",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "mixed_case",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.134,
+   "final_run_seconds": 0.134,
+   "reply_tokens": 496,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 1512,
+     "reply_chars": 595,
+     "reply_tokens": 496,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.134
+    }
+   ],
+   "program": "programs3c/word_freq/python-1.py",
+   "model": "claude-haiku-5-5"
+  }
+ ],
+ "summary": {
+  "claude-haiku-5-5": {
+   "python": {
+    "n": 42,
+    "correct": 40,
+    "public_pass": 42,
+    "gave_up": 0,
+    "silent_wrong": 1,
+    "loud_stop": 0,
+    "other_wrong": 1,
+    "rounds_median": 1.0,
+    "reply_tokens": 227655,
+    "tokens_per_correct": 5691.4,
+    "surface_error_rounds": 0,
+    "loop_seconds": 16.05,
+    "final_run_seconds": 16.051,
+    "paths": null
+   }
+  }
+ },
+ "ail_errors": {
+  "claude-haiku-5-5": []
+ }
+}
