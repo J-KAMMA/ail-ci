@@ -9,9 +9,9 @@ excerpt plus three noise lines; `expected.out` is the CPython reference.
 The tool works: CPython and the native binary are byte-identical on the fixture and on 11 probes
 (day rollover, empty/noise input, unresolved red, multiple reds before a candidate, culprit-only,
 shared-file merge, top-5 truncation), with both the default and the forced general build. The
-`--strict` build succeeds (same 98,888-byte binary and SHA-256 as default), so the typed path built
-the whole program. Cold compile median 2.04 s (warm cache 0.17 s); run median 0.0009 s and peak RSS
-1,968 KB versus CPython 0.0291 s and 13,008 KB on the fixture (median of 5). Friction: three `check`
+`--strict` build succeeds (same 99,120-byte binary and SHA-256 as default), so the typed path built
+the whole program. Cold compile median 1.78 s (warm cache 0.21 s); run median 0.0006 s and peak RSS
+1,968 KB versus CPython 0.020 s and 13,156 KB on the fixture (median of 5). Friction: three `check`
 rounds, about 6 minutes, mostly a refusal of `list[tuple[int, str]]` ("`top` is a srows") that did
 not name the replacement; see `lab/dogfood/gatestats/FRICTION.md` for the table and probes.
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass (3 modules, 0 failed).

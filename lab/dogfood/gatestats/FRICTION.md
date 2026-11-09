@@ -29,7 +29,7 @@ then `compile`; `check` is the fast type gate.
 | 1 | first `check` | `'rest' is annotated str in the source, but the caller also supplies int; refusing rather than silently choosing one.` Suggested: annotate the parameter `int` or decode first. | **No.** The real cause was the 3-way `message.partition(": ")` tuple unpack: `rest` was typed from the tuple, and the suggested int/decode fix was misleading. Replaced the unpack with `rest = message[message.find(": ") + 2:]`. | ~2 | No; `check` failed before any build. |
 | 2 | `n = min(5, len(top))` in the top-module block | `'top' is a srows; only an array, a list, a list of floats, a set, a dict, bytes and a list of str are walked as flat sequences here.` Suggested: loop over the rows or index `top[i][j]`. | **No.** The diagnostic names the list of tuples (`srows`) but suggests walking rows, not replacing the tuple list. First rewrote `min` as `n = len(top); if n > 5: n = 5`, which did not help. | ~1 | No; `check` stage. |
 | 3 | same block after the `min` rewrite | Same `'top' is a srows ...` message, now pointing at `n = len(top)`. | **Partly.** It identifies `top` as the problem but not the concrete replacement. Replaced `list[tuple[int, str]]` with a list of a small `@dataclass` (`Ranked(count, name)`) and sorted with `key=lambda r: (-r.count, r.name)`. `check` then passed. | ~3 | No; `check` stage. |
-| 4 | `compile` (default) | No error. | n/a | 0 | **No.** Also built with `--strict`: it succeeded with the same 98,888-byte binary and the same SHA-256 as the default build, and no `built on the general path` note. `file` shows an ELF PIE executable and `ldd` lists only libc (no libpython). A forced general build (`AIL_UNIFIED_FORCE=1`) also prints the same stdout. |
+| 4 | `compile` (default) | No error. | n/a | 0 | **No.** Also built with `--strict`: it succeeded with the same 99,120-byte binary and the same SHA-256 as the default build, and no `built on the general path` note. `file` shows an ELF PIE executable and `ldd` lists only libc (no libpython). A forced general build (`AIL_UNIFIED_FORCE=1`) also prints the same stdout. |
 
 Total friction: about 6 minutes, mostly the list-of-tuples refusal. No program-level refusal appeared
 on the typed path after the three edits, and no stdlib piece was missing (the tool uses only
@@ -39,13 +39,13 @@ on the typed path after the three edits, and no stdlib piece was missing (the to
 
 | Measurement | CPython 3.12 | AIL native binary |
 |---|---|---|
-| Compile, cold (`AIL_NO_CACHE=1`) | - | 2.04 s (range 2.00-2.18 s) |
-| Compile, warm cache | - | 0.17 s |
-| Binary size | - | 98,888 bytes |
-| Run wall time | 0.0291 s | 0.0009 s |
-| Peak RSS | 13,008 KB | 1,968 KB |
+| Compile, cold (`AIL_NO_CACHE=1`) | - | 1.78 s (range 1.76-1.80 s) |
+| Compile, warm cache | - | 0.21 s |
+| Binary size | - | 99,120 bytes |
+| Run wall time | 0.020 s | 0.0006 s |
+| Peak RSS | 13,156 KB | 1,968 KB |
 
-The fixture is tiny (403 lines), so the run-time ratio (about 32x) is dominated by CPython startup;
+The fixture is tiny (403 lines), so the run-time ratio (about 33x) is dominated by CPython startup;
 the point here is equality of output and the native binary, not a benchmark claim.
 
 ## Probes
@@ -74,7 +74,7 @@ Also checked: running with no argument gives the same usage text on stderr and e
 ## Review fix (defect 1)
 
 The first version counted the jobs named after `broken by` and on `red alone:` lines. The task asks
-for the modules that broke. `record_modules` now takes the name before `broken by`, otherwise the
+for the modules that broke. `module_names` takes the name before `broken by`, otherwise the
 names in the parenthesised test list. On the fixture this gives
 `test_ail_packaging 4 / test_ail_bigint 3 / test_ail_docs_site 2 / test_ail_hostile_input 2 /
 test_ail_par_reduce_rt 2`, as required. The `modules.py` probe checks the same split. All probes were
@@ -83,5 +83,5 @@ re-run on both builds after the change.
 ## Required AIL tests
 
 `python3 tools/par_check.py -j 2 test_ail_safetynet test_ail_files test_ail_corpus_findings3`:
-3 modules, 0 failed (236 s). No compiler, runtime, test, or manifest file was changed; the only
-changes are under `lab/dogfood/` plus the DEVLOG record.
+3 modules, 0 failed (150 s, final commit). No compiler, runtime, test, or manifest file was changed;
+the only changes are under `lab/dogfood/` plus the DEVLOG record.
