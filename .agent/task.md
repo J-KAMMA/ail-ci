@@ -1,3 +1,8 @@
+# CONTINUATION (2026-11-10): the previous run of this job ended with FINAL VERDICT: ERROR, most likely the
+# runner time limit. Your branch already holds the earlier commits: read git log and the DEVLOG first, do NOT
+# redo finished sub-steps, finish the remaining ones, commit and push after each. Keep the run under 4 hours;
+# if a full measurement cannot fit, cut seeds/sizes and say so in the report.
+
 Lane: vibe
 
 # vibe3: the main judge from now on: re-run the vibe benchmark on current integ, add Go and app-like tasks
