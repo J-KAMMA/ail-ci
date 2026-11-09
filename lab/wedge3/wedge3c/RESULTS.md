@@ -34,12 +34,14 @@ column says 10.5x and 14.1x).  PyPy needs no rewrite and is 5.47x (`2.893/0.529`
 
 ### What observation changed
 
-Observation annotated every executed function (parameters and returns) but **moved no function into
-the native column**.  Its value was diagnostic: jellyfish went from `unresolved-param` (all six units)
-to `unresolved-return` (all six), which names the real remaining gate.  msgpack's method reasons only
-changed wording (which `self` attribute was blamed).  In the observed jellyfish build `_normalize` was
-selected, but that is the one body the harness had to neutralise for the entry build (it is not a
-native rewrite of the real function and is never deployed).
+Observation annotated every executed function (parameters and returns) but **moved no deployable
+function into the native column**.  Its value was diagnostic: only `_normalize` was selected, and that
+is the one body the harness had to neutralise for the entry build (it is not a native rewrite of the
+real function and is never deployed).  Jellyfish's remaining units went from `unresolved-param` (all
+six) to `unresolved-return`, split as four refusals under `return branches require distinct tags`
+(`_jaro_winkler`, `jaro_winkler_similarity`, `levenshtein_distance`, `soundex`) and `_check_type` under
+`no return, or contradictory returns`; that split names the real remaining gate.  msgpack's method
+reasons only changed wording (which `self` attribute was blamed).
 
 ## 2. How the hybrid was applied
 

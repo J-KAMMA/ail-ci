@@ -19,9 +19,12 @@ at a time; every column's stdout and exit status matched CPython byte for byte.
 
 The sub-1.0 `hybrid/CPython` ratios are noise: no real function was selected, so the hybrid column is
 the unmodified pure library.  The msgpack native column is the C extension, not Rust -- no Rust rewrite
-exists; it is reported as the native baseline.  Observed kinds (`ail_observe annotate`) selected nothing
-either: they renamed jellyfish's gate from `unresolved-param` (all six) to `unresolved-return` (all six,
-`return branches require distinct tags`) and only regrouped msgpack's `_buffer` blame.  Ranked by
+exists; it is reported as the native baseline.  Observed kinds (`ail_observe annotate`) selected only
+`_normalize` (the sanitised helper the harness had to neutralise, never deployed), and split jellyfish's
+remaining gate from `unresolved-param` (all six) into four units refused as `unresolved-return: return
+branches require distinct tags` (`_jaro_winkler`, `jaro_winkler_similarity`, `levenshtein_distance`,
+`soundex`) plus `_check_type` refused as `unresolved-return: no return, or contradictory returns`; for
+msgpack they only regrouped the `_buffer` blame.  Ranked by
 CPython self time kept interpreted: jellyfish `unresolved-param: s1, s2` 1.793 s (`levenshtein_distance`),
 `s1, s2, long_tolerance` 1.022 s (`_jaro_winkler`, `jaro_winkler_similarity`), `s` 0.595 s (`_check_type`,
 `_normalize`, `soundex`); msgpack class-with-decorators/bases/metaclass 3.477 s, decorated or
