@@ -1,3 +1,25 @@
+## 2026-11-10 -- err4 continuation: verification of step 3 (job-err4-11100013)
+
+The earlier run finished the step-3 code and committed it; this run verified that state and ran the
+required modules again.  No compiler, runtime or test code changed -- a message rewrite that already
+matches `lab/err/messages_rewritten.json` byte for byte was left alone.
+
+Verification on this commit: `test_ail_agent_errors` 11 OK (550.9 s; every family's `--json`
+`message` equals the rewritten text, names the user's file/line, carries no `_ail_` and its
+`Replace:`/`With:` block builds and removes the message); `test_ail_safetynet` 5 OK;
+`test_ail_files` 18 OK (1 skipped); `test_ail_corpus_findings3` 2 OK;
+`test_ail_strict` 13 OK; `test_ail_refusal_messages` 3 OK (its pinned substrings -- the yield,
+while-else and dict-of-containers causes -- are still present in the rewritten texts).
+
+Probes in `/tmp/probes/` (the 15 triggers plus 12 boundary variants: empty and negative
+counts, values through an argument, a list item, an attribute, a dict value, a `break` inside
+while-else): the 13 step-3 families and all 12 variants print what CPython prints on both builds
+(`bash ~/tools/cmp.sh`).  `01_stdin_buffer` is the one mismatch: the fallback executable raises
+`AttributeError: '_AilStdinBuffer' object has no attribute 'readline'`; that is the step-2 AIL0101
+construct itself (the note tells the user to replace it), not a step-3 message change.
+
+`python3 tools/update_manifest.py --check` passes.
+
 ## 2026-11-09 -- err4: the agent format in the machine diagnostic message (job-err4-11091432)
 
 Step 3 of `docs/design/AGENT_ERRORS.md`.  `AIL_CURRENT/ail_agent_errors.py` now renders every
