@@ -49,9 +49,48 @@ Every probe is in `lab/reach/fcdict1/`; run in the default build and with `AIL_U
 | p15_bool_position | `a = d[1]; a[2] = False` (bool stays bool) | matches | general |
 | p16_get_guarded | `if 1 in d: a = d.get(1)` | matches | **typed** |
 
-p08 prints the int64 lines and exits 1 with an overflow message in both builds (CPython keeps
-the exact value); that is the declared int64 contract, not a defect of this task.
+p08 prints nothing and exits 1 with `OverflowError: integer overflow in +` in both builds
+(CPython prints the exact value); that is the declared int64 contract, not a defect of this
+task. Every other probe matches CPython's stdout and exit status in both builds.
 
 ## After
 
-Pending (see the report).
+No compiler change landed. The work needed to move the numbers is real, but it cannot be
+finished inside the files this job allows. What was tried and what the tree says:
+
+1. `ticket_audit`'s customer-visible blocker is not only the store. With the store shape the
+   existing `ail_syntax.lower_dict_of_records` already handles, the fallback happens at
+   `events.get(ev)` (line 111), and there are two further obstacles to lowering `events` at all:
+   - `e` is also bound by `for ev, e in top:` where `top = sorted(events.items(), key=...)[:3]`;
+     `_record_roles` does not recognise a *slice* of `sorted(d.items())` as the `items` role, so
+     the row-alias binding count check (`_lower_record_dict`) refuses the whole dict. A bare
+     `items`-role name in `top[:3]` is also refused by the transformer's `visit_Name`.
+   - even when the role check is satisfied (a prototype split `top` and appended a
+     `if _i >= 3: break` counter), the lowering's own generated code does not type:
+     its set position is boxed as `_AilRowSet.s: set[int]` while these sets hold `bytes`
+     seats, and `_rkey`-style temporaries are shared between dicts, so a `dict[int, ...]`
+     key temp is assigned a `bytes` key ("`_rkey__` is an int and is being assigned a
+     bytes", "a bytes list accepts only bytes elements", "a set[int] requires an int
+     element").  Those are `ail_syntax.py` (`_lower_record_dict` / `_RecordTransformer`)
+     changes, and this lane may not edit that file.
+2. `ledger_bin` additionally needs a nested `def` with `nonlocal` created once per loop
+   iteration (9 of its 15 strict blockers, `parse` lines 46-75). That feature is unrelated to
+   dict values; without it `ledger_bin` cannot be typed however the dict is handled.
+3. `lab/pyperf/run.py` additionally needs `statistics.median` on an unknown element type and
+   a `Path`-annotated parameter forwarding (its other strict blockers), so removing the
+   dict-of-containers refusal would still leave it refused.
+
+A prototype that rewrites `x = d.get(k)` + `if x is None: <never returns>` into
+`if k not in d: <body>; x = d[k]` (plus the `x is None or <test>` split) was implemented in
+`optlib.py` and does remove the `get` blocker (the first fallback line moves from the `get`
+to the store), but it cannot produce a typed program without the `ail_syntax.py` changes above.
+It was reverted so the tree carries no half-reachable lowering.
+
+Files that would have to change for this task: `AIL_CURRENT/ail_syntax.py`
+(`_record_roles`, `_lower_record_dict`, `_RecordTransformer`, the `_AilRowSet` box type and its
+key temporaries).  For `ledger_bin` also the nested-def-in-loop lowering in `pyfunc.py`
+(`_nested_def` refusal at `pyfunc.py:37420`).
+
+The probes above stay as the acceptance suite for that follow-up: every one already matches
+CPython in both builds, so they pin the semantics the lowering must keep.
+
