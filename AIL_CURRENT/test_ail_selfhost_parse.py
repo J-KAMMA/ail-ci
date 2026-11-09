@@ -105,6 +105,10 @@ BOUNDARY_INVALID = [
     "a, b += 1\n",
     "from . import ()\n",
     "try:\n    pass\nexcept E:\n    pass\nexcept* F:\n    pass\n",
+    "\ufeffx = 1\n",
+    "x = 1\n\ufeff",
+    "x\u200b = 1\n",
+    "\U0001f642 = 1\n",
 ]
 BOUNDARY_REFUSED = [
     "type X = int\n",
@@ -112,6 +116,8 @@ BOUNDARY_REFUSED = [
     "match x:\n    case 1:\n        pass\n",
     "def f[T](x):\n    pass\n",
     "class C[T]:\n    pass\n",
+    "caf\u00e9 = 1\n",
+    "\u2167 = 1\n",
 ]
 
 

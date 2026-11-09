@@ -179,3 +179,15 @@ valid input never reaches.
 The existing stage 1 expression tests still pass, and the test module now also parses 30 fixed S376
 files and compares the dump with `ast.parse`, plus the 20 snippets and the boundary cases.  It also
 builds `parse_drv.py` and checks the 30 files at stage 2 against stage 1.  All 9 tests pass.
+
+## Non-ASCII identifiers (refused by name)
+
+CPython accepts a Unicode identifier and NFKC-normalises it, so `café` and `cafe\u0301` name the
+same variable and `Ⅷ` becomes `VIII`.  AIL does not build `unicodedata.normalize`, so reproducing
+that is out of reach here.  `ailtok` therefore raises `ailparse: non-ASCII identifiers are not
+supported` at the first non-ASCII character in a NAME position instead of silently keeping the raw
+spelling.  That also refuses a BOM, a zero-width space, and other non-printable characters where
+`ast.parse` rejects them, rather than lexing them as names.  `tokenize` over the 376 S376 files
+finds **0** non-ASCII NAME tokens, so the number is unaffected; comments and string literals (where
+non-ASCII text does occur) are skipped by the tokenizer and still parse identically.  The test's
+boundary lists cover `\ufeff`, `x\u200b`, an emoji, `café` and `Ⅷ`.

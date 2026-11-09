@@ -153,13 +153,21 @@ def is_name_start(c: str) -> bool:
         return True
     if c == "_":
         return True
-    return ord(c) >= 128
+    if ord(c) < 128:
+        return False
+    # CPython accepts a Unicode identifier here and NFKC-normalises it, so `café` and `cafe\u0301`
+    # name the same variable.  AIL does not build `unicodedata.normalize`, so this cannot be made
+    # exact; refuse by name rather than silently keep the un-normalised spelling.  No S376 file
+    # has a non-ASCII NAME token (checked with `tokenize` over CORPUS.txt).
+    raise TokError("ailparse: non-ASCII identifiers are not supported")
 
 
 def is_name_char(c: str) -> bool:
     if c >= "0" and c <= "9":
         return True
-    return is_name_start(c)
+    if ord(c) < 128:
+        return is_name_start(c)
+    raise TokError("ailparse: non-ASCII identifiers are not supported")
 
 
 def is_digit(c: str) -> bool:
