@@ -26,14 +26,26 @@ _HINT = re.compile(r'\n?\s*(?:write instead|rewrite|Rewrite)\s*:\s*', re.I)
 
 # (pattern on the first line of the refusal, rewrite) for refusals that carry no hint of their own.
 _REWRITES = (
-    (r'\bdict of containers\b|dict of lists|dict of sets',
-     'keep the groups in a list of structs and map each key to its index with a dict[str, int]: '
-     '`idx[k] = len(groups); groups.append(G([]))`, then `groups[idx[k]].items.append(v)`'),
+    (r'\bdict of containers\b|dict of lists|dict of sets|is a dict whose values',
+     'keep the groups in a list of class instances and map each key to its index with a '
+     'dict[str, int]: `idx[k] = len(groups); groups.append(G([]))`, then '
+     '`groups[idx[k]].items.append(v)`'),
+    (r'\bwhile.{0,12}else', 'when the loop has no `break`, move the `else` body after the loop; '
+     'with a `break`, set a `done` flag before the loop and test it after'),
+    (r'tuple used where a single value', 'name the list and append the tuples: '
+     '`out: list[tuple[int, int]] = []`, `for m in moduli: out.append((m, ...))`, `return out`'),
+    (r'class list comprehensions', 'name the list, then loop and append: `out: list[P] = []`, '
+     '`for x in xs: out.append(P(x))`, `return out`'),
+    (r'is a list parameter, which is read-only', 'build and return a new list (`out = arr.copy()`, '
+     'change `out`, `return out`), or keep the list in a class field and pass the class'),
+    (r'returns bytes on one path', 'return bytes on both paths (`return b"0"`) or a number on '
+     'both; one function has one return type'),
     (r'\|\s*None|Optional|can be None',
      'return a sentinel (-1 or "") and compare with it, or raise when there is no value; `Node | None` '
      'is built for a class type'),
     (r'\bgenerator|\byield\b',
-     'build a list in a loop (`out: list[int] = []`, `out.append(x)`) and return or iterate it'),
+     '`yield` makes a generator; build a list in a loop (`out: list[int] = []`, `out.append(x)`, '
+     '`return out`) and return or iterate it'),
     (r'\bclosure|nested function|nonlocal|lambda',
      'move the inner function to module level and pass what it reads as parameters'),
     (r'\bdecorator',

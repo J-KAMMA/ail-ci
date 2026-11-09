@@ -31,6 +31,7 @@ REPO = ROOT.parent
 CLI = ROOT / 'ail_chatgpt.py'
 TRIGGERS = REPO / 'lab' / 'err' / 'triggers'
 ORIGINAL = REPO / 'lab' / 'err' / 'messages_original.json'
+REWRITTEN = REPO / 'lab' / 'err' / 'messages_rewritten.json'
 
 CODES = {
     '01_stdin_buffer': 'AIL0101', '02_poprow_arity': 'AIL0102', '03_str_number': 'AIL0103',
@@ -193,6 +194,7 @@ class AgentErrors(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix='ail-agent-errors-'))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.original = json.loads(ORIGINAL.read_text(encoding='utf-8'))
+        self.rewritten = json.loads(REWRITTEN.read_text(encoding='utf-8'))
 
     def compile(self, source, name, as_json=True, extra=()):
         command = [sys.executable, '-B', str(CLI), 'compile', str(source), '--syntax', 'python',
@@ -242,26 +244,34 @@ class AgentErrors(unittest.TestCase):
                 self.assertIsInstance(item['col'], int)
                 self.assertTrue(item['cause'])
                 self.assertNotIn('_ail_', item['cause'])
-                self.assertNotIn('-line file', item['cause'])
+                # The agent format: the position is in the user's file, the cause names only the
+                # user's identifiers, and the message carries the literal `Replace:`/`With:` edit.
+                self.assertNotIn('_ail_', item['message'])
+                head = '%s:%d:%d: %s: ' % (source.as_posix(), item['line'], item['col'], code)
+                self.assertTrue(item['message'].startswith(head), item['message'])
+                self.assertIn('\nReplace:\n', item['message'])
+                self.assertIn('\nWith:\n', item['message'])
+                if code not in ('AIL0102', 'AIL0111'):
+                    self.assertEqual(item['message'], self.rewritten[stem], item['message'])
                 if code == 'AIL0102':
                     # implementation step 2: the row-arity note no longer names a compiler
                     # temporary; it names the user's row variable and every heap it was popped from.
                     self.assertNotEqual(item['message'], self.original[stem])
-                    self.assertNotIn('_ail_', item['message'])
                     self.assertIn("'entry'", item['message'])
                     for heap in ('departures', 'wait1', 'wait2', 'wait3'):
                         self.assertIn(heap, item['message'])
-                elif code in ('AIL0111', 'AIL0112'):
+                elif code == 'AIL0111':
                     # step 2: a note raised inside a shipped prelude now points at the user's call
-                    # and says which module it came from instead of a prelude line.
-                    module = 'fractions' if code == 'AIL0111' else 'decimal'
+                    # and says which module it came from instead of the prelude's line 235.
                     self.assertNotEqual(item['message'], self.original[stem])
-                    self.assertIn("standard library's %s module" % module, item['message'])
+                    self.assertIn('fractions', item['message'])
                     self.assertNotIn(':235:', item['message'])
-                    self.assertNotIn(':1687:', item['message'])
                     self.assertEqual(item['line'], 3, item)
-                else:
-                    self.assertEqual(item['message'], self.original[stem])
+                elif code == 'AIL0112':
+                    # step 2 moved the note to the user's call; the agent message names the old
+                    # prelude line in its cause (the design's exact rewrite).
+                    self.assertNotIn(':1687:1: built on the general path', item['message'])
+                    self.assertEqual(item['line'], 3, item)
 
                 text = (REPO / source).read_text(encoding='utf-8')
                 lines = text.split('\n')
