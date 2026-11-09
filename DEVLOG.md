@@ -26,6 +26,32 @@ Probes `/tmp/probes_pypy1/repro.py`: header/separator/refused rows **11/11/11** 
 `_first_diff(b'ok\n', b'ok')` returns `"stdout line 1: CPython ends 'ok\\n' / PyPy ends 'ok'"`.
 Tests on the final tree: `test_ail_pypy_lab` 22, `test_ail_safetynet` 5, `test_ail_files` 18
 (1 skipped), `test_ail_corpus_findings3` 2 -- all OK.
+## 2026-11-08 -- obs2 re-applied: hybrid trap units load, C vectorcall entry (job-rbobs2-11090836)
+
+Re-applied the accepted `job-obs2-op1109` change (diff of `eb8b28cf`..`FETCH_HEAD`) on this tree: 18
+files, 6,109 insertions / 26 deletions (excluding `.agent`, `corpus`, `MANIFEST.json`). Two files
+conflicted in the three-way apply, both because the tree already carried obs1's version and the
+target adds obs2 on top of it: `docs/design/OBSERVED_TYPES.md` (the obs2 results paragraph) and
+`lab/wedge/observe_probe.py` (`--configs`, `native_loaded`). Both sides' fixes are kept — `HEAD`'s
+copies were byte-identical to obs1's commit `1c1e8b2f`, so the resolved files equal the target
+exactly and nothing else changed. New: `AIL_CURRENT/ail_observe.py`, `test_ail_observe.py`,
+`tests.d/test_ail_observe.txt`, `lab/wedge/guard_cost_obs2.json`, `obs2_hand_task{0,1}.json`.
+`tools/diff_ids.py` is not present on this tree, so only `python3 tools/update_manifest.py` ran; it
+found the pins already current and `--check` exits 0.
+
+Behaviour: the trap flag gains external linkage (indexing units import), an uncaught runtime raise
+falls back to the original instead of `_Exit(1)`, `build --cpython` imports every `.so` before
+listing a function and drops a broken extension, and CPython 3.12+ installs a per-unit C vectorcall
+entry on the original function object (guards, defaults, keywords and overflow fall back in C).
+
+Tests on this commit, `-j 2`: `test_ail_cpython_hybrid`, `test_ail_observe`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` -- 5 modules, 0 failed, 415 s. Probes: five
+`/tmp/probes/hc_*.py` programs under `cmp.sh` (general and default builds; two match, three are
+refused by name: too many positional arguments, int64 constant out of range, function-as-value) and
+five `hb_*_mod.py`+`hb_*_run.py` module/runner pairs through `ail build --cpython`, all matching
+CPython stdout and exit with every accelerated function reporting `_ail_is_native` true (basic
+types/defaults/keywords/arity, int64 overflow through an argument, list item, dict value and
+attribute, indexing and dict traps, nested `a[n][m]`, channels and aliasing).
 
 ## 2026-11-08 -- aiknow1: agent-facing AIL material (job-aiknow1-11081958)
 

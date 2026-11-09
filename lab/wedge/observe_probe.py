@@ -2,6 +2,7 @@
 """obs1 upper-bound probe: observed kinds fed to the existing hybrid selection (measurement only).
 
     python3 lab/wedge/observe_probe.py [-j 2] [--reps 5] [-o lab/wedge/observe_probe.json] [--only a,b]
+                                       [--configs hand,...] [--icount /tmp/icount]
 
 Per corpus module this
   1. runs `run.py` once under `AIL_CURRENT/ail_observe.py` and keeps the JSON profile;
@@ -15,6 +16,11 @@ Per corpus module this
      `expected.txt` (the CPython oracle) and the live CPython run, byte for byte;
   4. times CPython, the recorder (default and `--fast`), cProfile and the four hybrids, `--reps` rounds interleaved
      round-robin so drift hits every column alike, and keeps the median.
+
+`--configs` builds only the named configurations and drops the recorder and cProfile columns from
+phase 2 (obs2 re-measures `hand` this way).  Every built hybrid also records `native_loaded`: the
+accelerated functions that are really native in an imported copy of the module (obs1 found units
+listed in build.json that never loaded).
 
 Shares use the recorder's own self time of every function defined in `<kind>.py` (methods and
 nested functions included, `<module>` excluded).  Phase 2 runs one program at a time.
@@ -38,6 +44,22 @@ OBS = ROOT / 'AIL_CURRENT' / 'ail_observe.py'
 CORPUS = HERE / 'corpus'
 CONFIGS = ('hand', 'hand+obs', 'bare', 'bare+obs')
 TIMEOUT = 900
+SELECTED = list(CONFIGS)
+
+NATIVE_PROBE = r'''
+import json, sys
+sys.path.insert(0, '.')
+m = __import__(sys.argv[1])
+nat = getattr(m, '_ail_hybrid_native', None)
+def native(f):
+    if nat is None or f is None:
+        return False
+    check = getattr(nat, '_ail_is_native', None)
+    if check is not None:
+        return bool(check(f))
+    return getattr(f, '__globals__', None) is not vars(m)
+print(json.dumps(sorted(n for n in json.loads(sys.argv[2]) if native(getattr(m, n, None)))))
+'''
 
 sys.path.insert(0, str(ROOT / 'AIL_CURRENT'))
 import ail_observe  # noqa: E402
@@ -110,6 +132,8 @@ def prepare(kind_dir, base):
                               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
     rec['all_defs'] = sorted(ail_observe._def_nodes(ast.parse(text)))
     for cfg, (src, decisions) in variants.items():
+        if cfg not in SELECTED:
+            continue
         cdir = work / cfg.replace('+', '_')
         cdir.mkdir()
         for f in kind_dir.iterdir():
@@ -135,6 +159,13 @@ def prepare(kind_dir, base):
         c['accelerated'] = sorted(report.get('accelerated') or [])
         c['rejected'] = report.get('rejected') or {}
         shutil.copy2(cdir / 'run.py', hdir / 'run.py')
+        rcn, outn, errn = _run([sys.executable, '-B', '-c', NATIVE_PROBE, kind,
+                                json.dumps(c['accelerated'])], hdir)
+        try:
+            c['native_loaded'] = json.loads(outn.decode().strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            c['native_loaded'] = None
+            c['native_probe_error'] = _last(errn)[:300]
         rch, outh, errh = _run([sys.executable, '-B', 'run.py'], hdir)
         same = rch == rc0 and outh == out0 and _last(errh) == _last(err0) and outh == oracle
         c['match'] = same
@@ -149,15 +180,16 @@ def _columns(recs, base):
         kind = rec['module']
         work = base / kind
         cols[(kind, 'cpython')] = ([sys.executable, '-B', 'run.py'], work)
-        cols[(kind, 'observe')] = ([sys.executable, '-B', str(OBS), 'run', '-o',
-                                    str(work / 'p_t.json'), 'run.py'], work)
-        cols[(kind, 'observe_fast')] = ([sys.executable, '-B', str(OBS), 'run', '--fast', '-o',
-                                         str(work / 'p_f.json'), 'run.py'], work)
-        cols[(kind, 'cprofile')] = ([sys.executable, '-B', '-m', 'cProfile', '-o',
-                                     str(work / 'cp.out'), 'run.py'], work)
-        for cfg in CONFIGS:
+        if SELECTED == list(CONFIGS):
+            cols[(kind, 'observe')] = ([sys.executable, '-B', str(OBS), 'run', '-o',
+                                        str(work / 'p_t.json'), 'run.py'], work)
+            cols[(kind, 'observe_fast')] = ([sys.executable, '-B', str(OBS), 'run', '--fast',
+                                             '-o', str(work / 'p_f.json'), 'run.py'], work)
+            cols[(kind, 'cprofile')] = ([sys.executable, '-B', '-m', 'cProfile', '-o',
+                                         str(work / 'cp.out'), 'run.py'], work)
+        for cfg in SELECTED:
             hdir = work / cfg.replace('+', '_') / 'hybrid'
-            if rec['configs'][cfg].get('build_rc') == 0 and (hdir / 'run.py').is_file():
+            if rec['configs'].get(cfg, {}).get('build_rc') == 0 and (hdir / 'run.py').is_file():
                 cols[(kind, cfg)] = ([sys.executable, '-B', 'run.py'], hdir)
     return cols
 
@@ -203,11 +235,14 @@ def main():
     ap.add_argument('--reps', type=int, default=5)
     ap.add_argument('-o', '--out', default=str(HERE / 'observe_probe.json'))
     ap.add_argument('--only')
+    ap.add_argument('--configs', help='comma list of %s (default: all four)' % ', '.join(CONFIGS))
     ap.add_argument('--keep', help='work directory to keep (default: a temporary one)')
     ap.add_argument('--icount', help='tools/icount binary: also record instruction counts')
     ap.add_argument('--reuse', action='store_true',
                     help='load --out and the --keep work directory; redo only the timing')
     args = ap.parse_args()
+    if args.configs:
+        SELECTED[:] = [c for c in CONFIGS if c in args.configs.split(',')]
     dirs = sorted(p for p in CORPUS.iterdir() if (p / 'run.py').is_file())
     if args.only:
         keep = set(args.only.split(','))
@@ -227,7 +262,7 @@ def main():
                 print('%-16s %s' % (rec['module'], '  '.join(
                     '%s=%d%s' % (cfg, len(rec['configs'][cfg]['accelerated']),
                                  '' if rec['configs'][cfg]['match'] else '(MISMATCH)')
-                    for cfg in CONFIGS)), flush=True)
+                    for cfg in SELECTED)), flush=True)
         recs.sort(key=lambda r: r['module'])
         if args.icount:
             icount_all(recs, base, args.icount)
