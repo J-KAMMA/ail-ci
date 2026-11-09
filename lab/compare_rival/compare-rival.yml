@@ -69,6 +69,9 @@ jobs:
           curl -fsSL -o codon.tar.gz "https://github.com/exaloop/codon/releases/download/v$CODON/codon-linux-x86_64.tar.gz"
           mkdir -p /tmp/codon && tar xf codon.tar.gz -C /tmp/codon
           /tmp/codon/codon-deploy-linux-x86_64/bin/codon --version
+          curl -fsSL -o pypy.tar.bz2 "$PYPY_TARBALL"
+          echo "$PYPY_SHA256  pypy.tar.bz2" | sha256sum -c -
+          mkdir -p /tmp/pypy && tar xjf pypy.tar.bz2 -C /tmp/pypy
           sudo sysctl -w kernel.perf_event_paranoid=-1 || true
       - name: Versions
         run: |
@@ -77,11 +80,14 @@ jobs:
           test "$(/tmp/rival-venv/bin/mypy --version | awk '{print $2}')" = "$MYPY"
           test "$(/tmp/rival-venv/bin/python -m nuitka --version | head -1)" = "$NUITKA"
           test "$(/tmp/codon/codon-deploy-linux-x86_64/bin/codon --version)" = "$CODON"
+          test "$(/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3 -c 'import sys; v=sys.pypy_version_info; print("%d.%d.%d" % (v[0], v[1], v[2]))')" = "$PYPY"
+          test "$(/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3 -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])')" = "$PYPY_PYTHON"
           gcc --version | head -1; python3 --version; valgrind --version; nproc; free -g | head -2
       - name: Measure ${{ matrix.task }}
         run: |
-          python3 lab/compare_rival/run.py --tasks "${{ matrix.task }}" --no-safety \
-            --out "result-${{ matrix.task }}.json"
+          PYPY=/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3 \
+            python3 lab/compare_rival/run.py --tasks "${{ matrix.task }}" --no-safety \
+              --out "result-${{ matrix.task }}.json"
       - name: Keep results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -112,8 +118,13 @@ jobs:
             "cython==$CYTHON" "mypy==$MYPY" "nuitka==$NUITKA" "setuptools==$SETUPTOOLS"
           curl -fsSL -o codon.tar.gz "https://github.com/exaloop/codon/releases/download/v$CODON/codon-linux-x86_64.tar.gz"
           mkdir -p /tmp/codon && tar xf codon.tar.gz -C /tmp/codon
+          curl -fsSL -o pypy.tar.bz2 "$PYPY_TARBALL"
+          echo "$PYPY_SHA256  pypy.tar.bz2" | sha256sum -c -
+          mkdir -p /tmp/pypy && tar xjf pypy.tar.bz2 -C /tmp/pypy
       - name: Safety probes
-        run: python3 lab/compare_rival/run.py --safety --out result-safety.json
+        run: |
+          PYPY=/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3 \
+            python3 lab/compare_rival/run.py --safety --out result-safety.json
       - name: Keep results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

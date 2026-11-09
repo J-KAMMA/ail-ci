@@ -1,9 +1,9 @@
 # lab/compare_rival
 
 AIL against the tools that actually compete with it: the Python compilers **Nuitka, Cython, mypyc and Codon**
-(and Mojo, when it installs without an account). The existing `lab/compare` table has C, Rust, Go, Nim and
-CPython; this lab answers a narrower question: does AIL still win any column against compilers of the same
-source language?
+(and Mojo, when it installs without an account), plus the **PyPy** interpreter. The existing `lab/compare`
+table has C, Rust, Go, Nim and CPython; this lab answers a narrower question: does AIL still win any column
+against compilers of the same source language?
 
 ## Sources (the same rule as compare-lab)
 
@@ -16,9 +16,27 @@ source language?
 | `nuitka` | `src/<task>/main.py` | `python -m nuitka --onefile` |
 | `mypyc` | `src/<task>/typed.py` | `python -m mypyc typed.py` plus a 3-line launcher |
 | `codon` | `src/<task>/typed.py` | `codon build -release` |
+| `pypy` | `src/<task>/main.py` | nothing: `pypy3 -B main.py`, PyPy 7.3.23 (Python 3.11.15) |
 
 `typed.py` imports the pure-Python `ail` runtime (`AIL_CURRENT/ail.py`); mypyc gets a `.pyi` stub for it in
 the build directory and loads the real module at run time, so AIL's sources are never changed.
+
+PyPy is the one row that compiles nothing, and it is the row that matters most for the owner's question
+("is AIL clearly faster than PyPy on real Python code"). It gets two wall-time columns because its JIT needs
+warm-up:
+
+- **wall ms**: the median of 5 fresh processes, exactly like every other row. It includes interpreter start-up
+  and the JIT compiling the hot loops from cold.
+- **warm5 ms**: the 5th run **inside one process** (`pypy_warm.py`). The first run executes the program;
+  runs 2-5 call its `main()` again in the same module state, with a fresh stdin over the same bytes and
+  its own stdout file. That is what a long-lived process (a server, a notebook) sees, and it is the only
+  way the JIT sees the same code twice. A driver with no module-level `main` cannot be re-entered, so it
+  is re-executed instead and the row records `warm_mode: "re-exec"` — that number is **not** a warmed
+  JIT, and the report says so. Every run's stdout and exit status are checked against the same
+  `reference.py`, so a warm run that computes something else cannot pass silently.
+
+`compile s` is `-` for PyPy (nothing is compiled); its build-disk cell is the **interpreter install** and is
+marked `interpreter` (`interpreter: true` in `results.json`), not a build artifact. `single exe` is `no`.
 
 A refusal is a result: the first error line is kept in `results.json` and `RESULTS.md`. A tool that needs a
 syntax-only patch gets one under `patches/<tool>/<task>/` and the row is marked `patched`; no algorithm or
@@ -71,6 +89,18 @@ Everything is installed outside the repository (versions in `toolchains.env`):
     /tmp/rival-venv/bin/pip install -r <(printf 'cython==3.3.1\nmypy==2.4.1\nnuitka==4.3.4\nsetuptools==75.8.0\n')
     curl -fsSL https://github.com/exaloop/codon/releases/download/v0.20.6/codon-linux-x86_64.tar.gz \
       | tar xz -C /tmp/codon --strip-components=1     # Codon v0.20.6, Apache-2.0 (repo LICENSE)
+    . lab/compare_rival/toolchains.env
+    curl -fsSL -o pypy.tar.bz2 "$PYPY_TARBALL"
+    echo "$PYPY_SHA256  pypy.tar.bz2" | sha256sum -c -
+    mkdir -p /tmp/pypy && tar xjf pypy.tar.bz2 -C /tmp/pypy   # PyPy 7.3.23 / Python 3.11.15, MIT
+    export PYPY=/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3
+
+`downloads.python.org/pypy` publishes no `.sha256` beside the tarball (checked 2026-11-08: `.sha256`,
+`.md5`, `.b2sum`, `.asc` and `SHA256SUMS` are all 404, and there is no GitHub release asset). The pin in
+`toolchains.env` is therefore the digest this job **downloaded and unpacked**, recorded so a re-upload is
+detected rather than trusted; it is not a signature. The digest is
+`16f9f56e82d1f4ec95a324c1a8cacfd78afc7f0656c0a809a18725ef4391453a`, and the unpacked tree is 154 MB --
+that is the PyPy build-disk cell.
 
 `compare-rival.yml` in this directory is the proposed workflow (one job per task, manual dispatch); it is not
 under `.github/` because workers cannot push workflow files.

@@ -1,10 +1,12 @@
 # wedge1: what share of a Rust-rewrite hot path AIL compiles today
 
-Measurement only; the compiler is not changed.  Branch `job-wedge1-11080724`, run 2026-11-07 on a 4-core GitHub Actions runner, CPython 3.12.3, gcc 13.3.0, PyO3 0.22.6 for the Rust bar.
+Measurement only; the compiler is not changed.  Branch `job-wedge1-11080724`, run 2026-11-07 on a 4-core GitHub Actions runner, CPython 3.12.3, gcc 13.3.0, PyO3 0.22.6 for the Rust bar.  The PyPy column (section 2) was added on 2026-11-08 by `job-pypy1-11090337` with PyPy 7.3.23.
 
 ## The answer, in one paragraph
 
-Across 15 small hot-path modules of the kind real projects moved to Rust through PyO3, **24 of 97 top-level functions (24.7%) go native in the CPython hybrid**.  Because the hybrid only accelerates a *top-level function*, and because the hot function of a real module is very often a method, a nested helper or a list-returning builder, the functions that do go native carry only **5.0%** of the corpus's CPython self-time, and the hybrid runs at **0.983x** CPython wall time overall (geomean of hybrid/CPython, median of 5; below 1.0 is faster).  The largest single unlock is **not-a-top-level-function** (19.3% of the kept time): the hybrid's unit is a top-level function, so class methods and nested defs are refused before any type is looked at.  The largest unlock *inside* a function is **list-return-kind** (15.8%): `pymix` cannot track a `tuple`, `bytes` or a list return kind, so the whole function is dropped.  See the ranked table in section 4.
+Across 15 small hot-path modules of the kind real projects moved to Rust through PyO3, **29 of 97 top-level functions (29.9%) go native in the CPython hybrid**.  Because the hybrid only accelerates a *top-level function*, and because the hot function of a real module is very often a method, a nested helper or a list-returning builder, the functions that do go native carry only **5.0%** of the corpus's CPython self-time, and the hybrid runs at **0.983x** CPython wall time overall (geomean of hybrid/CPython, median of 5; below 1.0 is faster).  The largest single unlock is **not-a-top-level-function** (19.3% of the kept time): the hybrid's unit is a top-level function, so class methods and nested defs are refused before any type is looked at.  The largest unlock *inside* a function is **list-return-kind** (15.8%): `pymix` cannot track a `tuple`, `bytes` or a list return kind, so the whole function is dropped.  See the ranked table in section 4.
+
+**Against PyPy** (PyPy 7.3.23, section 2): PyPy runs the corpus at **0.159x** CPython time; the AIL standalone binary is **faster than PyPy on 8 of 13 modules** (geomean **0.829x** PyPy) and the hybrid on **0 of 15** (geomean **6.197x**), with PyPy's output byte-identical to CPython on 15 of 15 modules.  The standalone pair is 13 of 15 because the two modules whose default binary stops loudly on int64 need `--exact-int`, so they have no default-run time in `measure.json`.
 
 ## 1. The corpus
 
@@ -31,31 +33,41 @@ Fifteen small modules under `lab/wedge/corpus/<kind>/`, each a `<kind>.py` of pl
 
 ## 2. Per-module results
 
-`native` is the functions the hybrid build actually wrapped (from `build.json`).  `match` is byte-identical stdout, exit status and last stderr line against `python3 run.py`.  `oracle` is the committed `expected.txt` matching the live CPython run byte for byte.  Wall time is the median of 5 runs.  `standalone` is the binary from `ail compile run.py --syntax python`; `(+exact)` means the default build stopped loudly on int64 overflow and `--exact-int` then built a matching binary.
+`native` is the functions the hybrid build actually wrapped (from `build.json`).  `match` is byte-identical stdout, exit status and last stderr line against `python3 run.py`.  `oracle` is the committed `expected.txt` matching the live CPython run byte for byte.  `pypy match` is the same `expected.txt` against every one of PyPy's five runs (a difference is a PyPy result, recorded in `measure.json` as `pypy_diff`, not fixed in the sources).  Wall time is the median of 5 runs.  `standalone` is the binary from `ail compile run.py --syntax python`; `(+exact)` means the default build stopped loudly on int64 overflow and `--exact-int` then built a matching binary.
 
-| module | funcs | native | native share | oracle | hybrid match | standalone | CPython s | hybrid s | hybrid / CPython | standalone s |
-| --- | ---: | ---: | ---: | --- | --- | --- | ---: | ---: | ---: | ---: |
-| `ast_lint` | 7 | 0 | 0% | yes | yes | match | 1.739 | 1.842 | 1.060x | 0.706 |
-| `bitset_bloom` | 7 | 2 | 29% | yes | yes | match (+exact) | 1.809 | 1.806 | 0.999x | n/a |
-| `csv_parse` | 6 | 1 | 17% | yes | yes | match | 2.04 | 1.884 | 0.923x | 0.14 |
-| `dataframe_group` | 7 | 3 | 43% | yes | yes | match | 0.972 | 0.899 | 0.924x | 0.023 |
-| `edit_dist` | 6 | 0 | 0% | yes | yes | match | 2.232 | 2.232 | 1.000x | 1.945 |
-| `field_valid` | 7 | 4 | 57% | yes | yes | match | 2.11 | 2.183 | 1.035x | 0.11 |
-| `float_loops` | 8 | 0 | 0% | yes | yes | match | 2.198 | 2.206 | 1.003x | 0.153 |
-| `graph_search` | 6 | 0 | 0% | yes | yes | match | 2.076 | 2.023 | 0.974x | 1.963 |
-| `hashing` | 7 | 0 | 0% | yes | yes | match (+exact) | 1.665 | 1.666 | 1.001x | n/a |
-| `json_parse` | 4 | 3 | 75% | yes | yes | match | 1.415 | 1.275 | 0.901x | 1.423 |
-| `matrix` | 8 | 4 | 50% | yes | yes | match | 2.894 | 2.905 | 1.004x | 0.023 |
-| `rolling_stats` | 8 | 4 | 50% | yes | yes | match | 2.664 | 2.424 | 0.910x | 0.12 |
-| `sort_rank` | 7 | 3 | 43% | yes | yes | match | 1.504 | 1.531 | 1.018x | 1.609 |
-| `tokenizer` | 7 | 0 | 0% | yes | yes | match | 0.885 | 0.883 | 0.998x | 0.093 |
-| `tree_build` | 2 | 0 | 0% | yes | yes | match | 1.97 | 1.987 | 1.009x | 0.177 |
+| module | funcs | native | native share | oracle | hybrid match | pypy match | standalone | CPython s | PyPy s | hybrid s | hybrid / CPython | hybrid / PyPy | standalone / PyPy |
+| --- | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `ast_lint` | 7 | 0 | 0% | yes | yes | yes | match | 1.739 | 0.313 | 1.842 | 1.060x | 5.890x | 2.2558x |
+| `bitset_bloom` | 7 | 2 | 29% | yes | yes | yes | match (+exact) | 1.809 | 0.209 | 1.806 | 0.999x | 8.628x | n/a |
+| `csv_parse` | 6 | 1 | 17% | yes | yes | yes | match | 2.04 | 0.362 | 1.884 | 0.923x | 5.206x | 0.3875x |
+| `dataframe_group` | 7 | 3 | 43% | yes | yes | yes | match | 0.972 | 0.363 | 0.899 | 0.924x | 2.475x | 0.0634x |
+| `edit_dist` | 6 | 3 | 50% | yes | yes | yes | match | 2.232 | 0.25 | 2.232 | 1.000x | 8.922x | 7.7756x |
+| `field_valid` | 7 | 4 | 57% | yes | yes | yes | match | 2.11 | 0.416 | 2.183 | 1.035x | 5.252x | 0.2646x |
+| `float_loops` | 8 | 0 | 0% | yes | yes | yes | match | 2.198 | 0.584 | 2.206 | 1.003x | 3.774x | 0.2610x |
+| `graph_search` | 6 | 0 | 0% | yes | yes | yes | match | 2.076 | 0.537 | 2.023 | 0.974x | 3.769x | 3.6574x |
+| `hashing` | 7 | 0 | 0% | yes | yes | yes | match (+exact) | 1.665 | 0.174 | 1.666 | 1.001x | 9.559x | n/a |
+| `json_parse` | 4 | 3 | 75% | yes | yes | yes | match | 1.415 | 0.247 | 1.275 | 0.901x | 5.153x | 5.7537x |
+| `matrix` | 8 | 5 | 62% | yes | yes | yes | match | 2.894 | 0.081 | 2.905 | 1.004x | 35.702x | 0.2870x |
+| `rolling_stats` | 8 | 4 | 50% | yes | yes | yes | match | 2.664 | 0.368 | 2.424 | 0.910x | 6.582x | 0.3263x |
+| `sort_rank` | 7 | 3 | 43% | yes | yes | yes | match | 1.504 | 0.334 | 1.531 | 1.018x | 4.578x | 4.8123x |
+| `tokenizer` | 7 | 1 | 14% | yes | yes | yes | match | 0.885 | 0.102 | 0.883 | 0.998x | 8.669x | 0.9153x |
+| `tree_build` | 2 | 0 | 0% | yes | yes | yes | match | 1.97 | 0.522 | 1.987 | 1.009x | 3.805x | 0.3391x |
 
 **Silent differences: zero.**  Every hybrid build matched CPython on every module; the standalone build matched on 13 of 15 by default and all 15 with `--exact-int`.  The two default-build stops are loud (`OverflowError: integer overflow in * ... --exact-int gives exact ints`), never a wrong answer.
+
+**PyPy output: 15 of 15 modules byte-identical.**  PyPy ran the same `run.py` on the same input, five times, and every run was compared with the committed `expected.txt`.
 
 ### What the wall-time columns say
 
 The hybrid runs at **0.983x** CPython (`hybrid / CPython` below 1.0 means faster; geomean over 15 modules, range 0.901x-1.06x -- the same convention as the table column).  It is not faster in the aggregate because the functions that went native carry only 5.0% of the self time; the rest is still interpreted.  The standalone binary is much faster where the whole program types (matrix 2.89 s vs 0.023 s, dataframe_group 0.97 s vs 0.023 s, rolling_stats 2.66 s vs 0.12 s, field_valid 2.11 s vs 0.11 s), so the boundary is not the C quality -- it is the *selection*.
+
+### What PyPy does to the same fifteen modules
+
+PyPy needs no build and no types: it runs `run.py` and JIT-compiles the hot loops.  On this corpus it is **0.159x** CPython wall time (geomean over 15 modules that matched the oracle), so a plain CPython program already gets most of what this benchmark is about.  The hybrid, which keeps the function boundary, lands at **6.197x** PyPy (0 of 15 modules faster than PyPy) and the standalone binary at **0.829x** PyPy (8 of 13 faster).  Ratios below 1.0 mean AIL is faster; `measure.json` holds every median.
+
+Where the two AIL arms lose to PyPy is the module whose hot function is a plain method or a container-returning builder: the hybrid leaves it on CPython (so it pays CPython plus the boundary) and PyPy makes it fast.  Where the standalone binary types the whole driver it beats PyPy by the C-quality margin the table shows.
+
+The standalone arm is not uniformly ahead: it loses to PyPy on **5 of 13** measured modules, worst on `ast_lint` 2.26x, `graph_search` 3.66x, `sort_rank` 4.81x, `json_parse` 5.75x.  Those are the programs whose data model (tuple-heavy ASTs, string-keyed dicts, per-element object churn) costs more in the typed lowering than a JIT that specializes the same shapes at run time, so the comparison is not "C beats a JIT" on this corpus -- it is task-dependent.
 
 ## 3. The Rust bar
 
@@ -116,9 +128,9 @@ The rest, in order: `list-str-parameter` (`list[str]`, 2.5 s), `call-can-raise` 
 
 `float_loops` gets none of its 8 functions, but `list[float]` ABI is **not** the only reason: the typed emitter accepts 7 of the 8, and `scale_into` is refused earlier by `pymix` as `unresolved-return` (family list-return-kind), so it never reaches the ABI gate.  For the 7 that do, `pyfunc.to_c` spells a `list[float]` parameter as a whole `ail_flist` value (`double dot(ail_flist v_a, ail_flist v_b)`); `pyboxed2._mix_validate_signature` demands the `const double *v_a, int64_t v_a_len` pair it demands for `list[int]`, and `ail_cpython_hybrid._c_proto` / `_wrapper_source` build the same pointer+length call.  Every `list[float]` candidate therefore fails the ABI cross-check and stays boxed.  This is not a semantic limit: the whole-program typed build compiles the same module on the typed path (2.20 s -> 0.15 s), and the hybrid wrapper already allocates and fills the `double *` buffer -- it just hands it over in the wrong shape (`ail_flist` is `{double *p; int64_t n, cap}`, so a value can be built in one line).  With the ABI spelling fixed only `max_abs` and `sq_sum` have no other body gate (2 of the 7); `dot`/`blend` also index and pass a list parameter to `len()` (W4 plus the list-parameter gate), `mean`/`variance`/`norm` divide by a non-constant, and `scale_into` needs W2.  With W4 too, 2 of the 7 become reachable (0.21 s); the module does not go from 0 to 8.
 
-### A second defect: 54 of the 73 refusals are silent
+### A second defect: 54 of the 68 refusals are silent
 
-`docs/STRATEGY.md` promises that "when a function stays on CPython, the build says which line keeps it there and how to fix it".  It does not.  `build.json` carries a `rejected` map with a reason only for a function that reached a *unit* and was then dropped by `_select`; a function pymix or the emitter refused never gets a unit, so nothing is recorded and the key is simply absent.  Across this corpus **54 of the 73 functions that stayed on CPython (74.0%) carry no reason at all**, including every function in `ast_lint`, `float_loops`, `graph_search`, `tokenizer`'s `is_ident_*`, and `csv_parse`'s module constant group.  The rest of `STRATEGY.md`'s loop -- an AI reads the reason, applies the fix -- cannot close on 54 of the 73 refusals.
+`docs/STRATEGY.md` promises that "when a function stays on CPython, the build says which line keeps it there and how to fix it".  It does not.  `build.json` carries a `rejected` map with a reason only for a function that reached a *unit* and was then dropped by `_select`; a function pymix or the emitter refused never gets a unit, so nothing is recorded and the key is simply absent.  Across this corpus **54 of the 68 functions that stayed on CPython (79.4%) carry no reason at all**, including every function in `ast_lint`, `float_loops`, `graph_search`, `tokenizer`'s `is_ident_*`, and `csv_parse`'s module constant group.  The rest of `STRATEGY.md`'s loop -- an AI reads the reason, applies the fix -- cannot close on 54 of the 68 refusals.
 
 The information exists: `lab/wedge/boundary.py` recovers it by re-running `pymix.analyze` and `to_c` itself, which is exactly what `_analysis` already does inside a subprocess.  Surfacing it is a reporting change in `ail_cpython_hybrid._select`, not a compiler change; W0 below covers it.
 
@@ -128,11 +140,11 @@ Ordered W0 (reporting, no time), then W4 (the body prerequisite), then W2/W3/W6 
 
 ### W0 -- silent-refusal (unlocks the other tasks; moves no time itself)
 
-Surface the refusal reason in `build.json` for a function that never reaches a unit.  Today `_select` records a reason only for a function it saw and dropped; a function that `pymix.analyze` or `to_c` refuses gets no unit, so `rejected` has no key and the build is silent (54 of 73 refusals here).  `lab/wedge/boundary.py` already recovers the reason by re-running `pymix.analyze` and `to_c`; move that call into the same place `_analysis` runs, and write `{function: {gate, reason}}` under `rejected` even when `_select` never produced a unit.  This is a reporting change, not a compiler change: no function goes native.  Its gain is that the other tasks below become queueable -- without it 54 of 73 refusals cannot be acted on.
+Surface the refusal reason in `build.json` for a function that never reaches a unit.  Today `_select` records a reason only for a function it saw and dropped; a function that `pymix.analyze` or `to_c` refuses gets no unit, so `rejected` has no key and the build is silent (54 of 68 refusals here).  `lab/wedge/boundary.py` already recovers the reason by re-running `pymix.analyze` and `to_c`; move that call into the same place `_analysis` runs, and write `{function: {gate, reason}}` under `rejected` even when `_select` never produced a unit.  This is a reporting change, not a compiler change: no function goes native.  Its gain is that the other tasks below become queueable -- without it 54 of 68 refusals cannot be acted on.
 
 **Guard:** `build.json` for `ast_lint`, `float_loops`, `graph_search` and `tokenizer` lists a `gate` and `reason` for every function that stayed on CPython.  Guard: a new `test_ail_cpython_hybrid` case whose module has one pymix-refused and one emitter-refused function, asserting both appear in `rejected`; plus `test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
 
-**Gain:** measured: makes 54 of 73 refusals (74.0%) name their gate and fix; 0 s moves native by itself.
+**Gain:** measured: makes 54 of 68 refusals (79.4%) name their gate and fix; 0 s moves native by itself.
 
 ### W4 -- indexing-can-raise (measured ceiling 12.6% of the corpus self time)
 
