@@ -13,7 +13,9 @@ Headline numbers: AIL is the fastest column on elementwise f64 (152 ms, 1.00x) a
 gaps are matmul 2048 f64 (5354 ms, 11.1x NumPy's 482 ms), softmax 1024 f32 (114.5 ms, 9.6x C's
 11.9 ms) and matmul 1024 f64 (690 ms, 5.1x NumPy's 134 ms). The f32 path pays for the per-op
 round-to-f32 helper (elementwise f32 323 ms vs C 115 ms). AIL's f64 outputs agree with NumPy to
-<=4.1e-16 relative on these checks; f32 to <=7.9e-7 (C) / <=6.9e-10 (AIL matmul). The full
+<=8.7e-16 relative on these checks; over all columns f64 is <=1.4e-10 and f32 <=3.2e-6 (both
+worst on the C sum, whose reduction order differs from NumPy's), while AIL's own f32 is
+<=5.6e-7 (mlp) and <=3.8e-7 on matmul. The full
 transformer block is not expressible: layer norm, 2-D reductions, row broadcast and a fused
 softmax are missing; the attention core is written with manual row loops. No Vulkan device on
 the runner (loader present, no ICD), and the GPU path covers marked loops only, not `ta.matmul`.

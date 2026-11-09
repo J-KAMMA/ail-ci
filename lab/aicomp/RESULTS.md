@@ -18,9 +18,11 @@ Environment:
 
 Data are deterministic: `value(i, salt) = ((i*1664525 + 1013904223 + salt*2654435761) mod 2**32) / 2**32`.
 The error column is the maximum relative difference from NumPy over the reported aggregate checks
-(`total`, `abs`, `maxabs`) and the maximum absolute difference over three sampled elements. The
-checks themselves use a sequential `float64` sum in every column, so they compare the data, not a
-different summation order; full outputs are not compared element by element.
+(`total`, `abs`, `maxabs`) and the maximum absolute difference over three sampled elements. For
+most rows the `total`/`abs` checks are a sequential `float64` sum over each column's output, so
+they compare the data, not a different summation order; the exception is the sum workload, whose
+`total` is the column's own reducer and so includes that column's summation order. Full outputs
+are not compared element by element.
 
 ## Process start-up floor (median wall)
 
