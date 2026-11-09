@@ -1,0 +1,6094 @@
+{
+ "meta": {
+  "started": "2026-11-09T07:33:18Z",
+  "harness": "lab/vibe/run.py",
+  "model": "opencode/deepseek-v4.1-flash-free",
+  "cli": "opencode",
+  "effort": null,
+  "rounds": 5,
+  "seeds": [
+   0,
+   1
+  ],
+  "languages": [
+   "python",
+   "ail"
+  ],
+  "tasks": [
+   "berth_sim",
+   "chain_relax",
+   "csv_rollup",
+   "dsl_calc",
+   "echo_pack",
+   "expense_split",
+   "gradebook",
+   "ini_merge",
+   "jsonl_stats",
+   "ledger_bin",
+   "log_levels",
+   "matrix_stats",
+   "rail_transfer",
+   "scar_life",
+   "tally_lang",
+   "term_rank",
+   "ticket_audit",
+   "todo_file",
+   "tree_fold",
+   "version_sort",
+   "word_freq"
+  ],
+  "jobs": 2,
+  "case_timeout": 90,
+  "mode": "python = CPython 3.12; rust = rustc -O --edition=2021; ail = AIL compile --syntax python; ail-strict = AIL with lab/vibe2/STRICT_SPEC.md; ail-new = lab/vibe2/NEW_SURFACE.md translated to AIL Python by lab/vibe2/translate.py",
+  "seed_note": "seed = independent repeated attempt; the CLI exposes no sampling seed",
+  "updated": "2026-11-09T10:29:14Z"
+ },
+ "results": [
+  {
+   "task": "berth_sim",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 4,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 23,
+   "hidden": [
+    {
+     "name": "no_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_ship",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_cargo",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "setup_same_operator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "operator_memory_per_berth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "priority_then_arrival_then_id",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "small_berth_chooses_first",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "berth_number_order_within_class",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_ship_waits",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "depart_and_arrive_same_minute",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "ceil_division",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "extreme_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unsorted_input",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "wait_max_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_berths_few_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_busy",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_calm",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 15.336,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 3957,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 5888,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "the model returned no text",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "the model returned no text"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 6023,
+     "reply_chars": 4692,
+     "reply_tokens": 1250,
+     "build_ok": false,
+     "build_seconds": 3.338,
+     "build_error": "/tmp/vibe-berth_sim-ail-0-qlwavqqz/main.py:6:5: not in the subset: sys.stdin.buffer: only sys.stdin.read(), sys.stdin.readline() and sys.exit(<int>) are supported, and only as calls; sys.stdin.buffer used as a value is not (the general path could not build this program either); general path: the method .readline() (on a instance:_AilStdinBuffer)\nnote: /tmp/vibe-berth_sim-ail-0-qlwavqqz/main.py:86: a list slot that may be None is only read as a list (a method receiver, or the list argument of heappush / heappop / len); reading it as a value would be None in CPython, which this form cannot repre",
+     "compiler": [
+      [
+       "error",
+       "not in the subset: sys.stdin.buffer: only sys.stdin.read(), sys.stdin.readline() and sys.exit(<int>) are supported, and only as calls; sys.stdin.buffer used as a value is not (the general path could not build this progra"
+      ],
+      [
+       "note",
+       "a list slot that may be None is only read as a list (a method receiver, or the list argument of heappush / heappop / len); reading it as a value would be None in CPython, which this form cannot represent"
+      ],
+      [
+       "note",
+       "cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation"
+      ],
+      [
+       "note",
+       "cannot tell the type of element 2 of this tuple (an empty list or a value of unknown type); give it a name with an annotation"
+      ],
+      [
+       "note",
+       "cannot tell the type of element 1 of this tuple (an empty list or a value of unknown type); give it a name with an annotation"
+      ],
+      [
+       "note",
+       "sys.stdin.buffer used as a value is not built: call it as a statement (sys.stdout.write(text) on its own line, sys.stdin.buffer.read())"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "compiler error:\n/tmp/vibe-berth_sim-ail-0-qlwavqqz/main.py:6:5: not in the subset: sys.stdin.buffer: only sys.stdin.read(), sys.stdin.readline() and sys.exit(<int>) are supported, and only as calls; sys.stdin.buffer used as a value is not (the general path could not build this program either); general path: the method .readline() (on a instance:_AilStdinBuffer)\nnote: /tmp/vibe-berth_sim-ail-0-qlwavqqz/main.py:86: a list slot that may be None is only read as a list (a method receiver, or the list argument of heappush / heappop / len); reading it as a value would be None in CPython, which this form cannot represent\nnote: /tmp/vibe-berth_sim-ail-0-qlwavqqz/main.py:86: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\nnote: /tmp/vibe-berth_sim-ail-0-qlwavqqz/main.py:140: cannot tell the type of element 2 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\nnote: /tmp/vibe-berth_sim-ail-0-qlwavqqz/main.py:142: cannot tell the type of element 1 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\nnote: /tmp/vibe-berth_sim-ail-0-qlwavqqz/main.py:6: sys.stdin.buffer used as a value is not built: call it as a statement (sys.stdout.write(text) on its own line, sys.stdin.buffer.read())\n"
+    },
+    {
+     "round": 3,
+     "prompt_chars": 12024,
+     "reply_chars": 5089,
+     "reply_tokens": 1351,
+     "build_ok": false,
+     "build_seconds": 4.706,
+     "build_error": "/tmp/vibe-berth_sim-ail-0-qlwavqqz/main.py:33:5: not in the subset: field 'append' requires a class instance (the general path could not build this program either); general path: name 'heappush' is not defined\n",
+     "compiler": [
+      [
+       "error",
+       "not in the subset: field 'append' requires a class instance (the general path could not build this program either); general path: name 'heappush' is not defined"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "compiler error:\n/tmp/vibe-berth_sim-ail-0-qlwavqqz/main.py:33:5: not in the subset: field 'append' requires a class instance (the general path could not build this program either); general path: name 'heappush' is not defined\n"
+    },
+    {
+     "round": 4,
+     "prompt_chars": 11299,
+     "reply_chars": 5166,
+     "reply_tokens": 1356,
+     "build_ok": true,
+     "build_seconds": 7.289,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because incompatible class types assigned to rec; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/berth_sim/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "berth_sim",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 23,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3770,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 240s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 240s"
+    }
+   ],
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "chain_relax",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 29,
+   "hidden": [
+    {
+     "name": "two_elements",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "three_elements",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_sweep",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "two_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "seed_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "seed_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "medium",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_sweeps_small",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "odd_length",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "even_length",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "n_max_no_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "t_max_tiny",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "n_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "t_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "seed_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "not_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_arg",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "four_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 5.795,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 1282,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 5490,
+     "reply_chars": 3694,
+     "reply_tokens": 1282,
+     "build_ok": true,
+     "build_seconds": 5.792,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because parse_seed returns a list on one path and a number on another; every return path of one function has to hand back the same kind, and this compiler settles that kind on"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/chain_relax/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "chain_relax",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 29,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3372,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 240s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 240s"
+    }
+   ],
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "csv_rollup",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 6,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_mixed",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 12.837,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 1014,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 5686,
+     "reply_chars": 3379,
+     "reply_tokens": 1014,
+     "build_ok": true,
+     "build_seconds": 12.834,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because the constant None; this language has no null value, so nothing holds one -- build a linked structure as parallel index lists (left[] and right[] of int, -1 where Pytho"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/csv_rollup/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "dsl_calc",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "whitespace",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "overflow_keeps_operands",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "clear_final",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "missing_args",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 6.893,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 1475,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 5172,
+     "reply_chars": 5619,
+     "reply_tokens": 1475,
+     "build_ok": true,
+     "build_seconds": 6.89,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because 's' is a str and is being assigned an int; a local's kind is settled by its FIRST assignment and never changes afterwards -- give the second kind a different name, or "
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/dsl_calc/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "dsl_calc",
+   "lang": "ail",
+   "seed": 1,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "whitespace",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "overflow_keeps_operands",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "clear_final",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "missing_args",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 6.3,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 1625,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 5172,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "the model returned no text",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "the model returned no text"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 5307,
+     "reply_chars": 6374,
+     "reply_tokens": 1625,
+     "build_ok": true,
+     "build_seconds": 6.297,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because the constant None; this language has no null value, so nothing holds one -- build a linked structure as parallel index lists (left[] and right[] of int, -1 where Pytho"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/dsl_calc/ail-1.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "dsl_calc",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "whitespace",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "overflow_keeps_operands",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "clear_final",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "missing_args",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.071,
+   "final_run_seconds": 0.071,
+   "reply_tokens": 940,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3054,
+     "reply_chars": 4113,
+     "reply_tokens": 940,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.071
+    }
+   ],
+   "program": "lab/vibe/programs3/dsl_calc/python-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "echo_pack",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 54,
+   "hidden": [
+    {
+     "name": "pack_empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_one_byte",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_four_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_five_same",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_zero_run",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_overlap_period3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_tail_short",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_literal_128",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_literal_257",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_hidden_long_match",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_visible_long_match",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_distance_limit",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_distance_just_inside",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_tie_largest_p",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_max_len_131",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_binary_all_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_empty_stream",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_zero_run",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_custom_valid",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_overlap_dist1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_empty_input",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_bad_magic",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_short_length",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_truncated_literal",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_truncated_distance",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_dist_zero",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_dist_too_far",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_copy_too_long",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_literal_too_long",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_missing_hash",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_trailing_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_length_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_length_zero_with_token",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_mode",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "pack_random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_corrupt0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt1",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt3",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    }
+   ],
+   "loop_seconds": 11.544,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 1194,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6666,
+     "reply_chars": 4335,
+     "reply_tokens": 1194,
+     "build_ok": true,
+     "build_seconds": 11.541,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because import of 'collections' with a use that is not built: Counter, defaultdict (int, float, str, list, lambda: <constant>), OrderedDict and deque are built for str / int /"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/echo_pack/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "echo_pack",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 54,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4548,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 240s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 240s"
+    }
+   ],
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "expense_split",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_amount",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_participant",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_remainder",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_sum",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 4.126,
+   "final_run_seconds": 0.004,
+   "reply_tokens": 383,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4548,
+     "reply_chars": 1500,
+     "reply_tokens": 383,
+     "build_ok": true,
+     "build_seconds": 4.123,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because 'balances' is keyed by a str in one place and by something else in another; a dict or a set has one key kind throughout; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.004
+    }
+   ],
+   "program": "lab/vibe/programs3/expense_split/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "expense_split",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_amount",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_participant",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_remainder",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_sum",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.068,
+   "final_run_seconds": 0.068,
+   "reply_tokens": 360,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2430,
+     "reply_chars": 1377,
+     "reply_tokens": 360,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.068
+    }
+   ],
+   "program": "lab/vibe/programs3/expense_split/python-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "gradebook",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "floor",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_sums",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_rows",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 10.091,
+   "final_run_seconds": 0.004,
+   "reply_tokens": 382,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3963,
+     "reply_chars": 1376,
+     "reply_tokens": 382,
+     "build_ok": true,
+     "build_seconds": 10.087,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because a bytes field inside a tuple in a list is not held; the row is int64 or double fields only; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.004
+    }
+   ],
+   "program": "lab/vibe/programs3/gradebook/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "gradebook",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "floor",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_sums",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_rows",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.068,
+   "final_run_seconds": 0.068,
+   "reply_tokens": 271,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 1845,
+     "reply_chars": 977,
+     "reply_tokens": 271,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.068
+    }
+   ],
+   "program": "lab/vibe/programs3/gradebook/python-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "ini_merge",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "default_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_sections",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "spaces_in_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 10.246,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 334,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4477,
+     "reply_chars": 1358,
+     "reply_tokens": 334,
+     "build_ok": true,
+     "build_seconds": 10.243,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because `sections[current] = {}` uses `sections` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-key"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/ini_merge/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "ini_merge",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "default_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_sections",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "spaces_in_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.051,
+   "final_run_seconds": 0.051,
+   "reply_tokens": 309,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2359,
+     "reply_chars": 1223,
+     "reply_tokens": 309,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.051
+    }
+   ],
+   "program": "lab/vibe/programs3/ini_merge/python-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "jsonl_stats",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": false,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 1,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "loud_stop",
+     "exit": 1,
+     "expected_exit": 0
+    },
+    {
+     "name": "escapes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_users",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_tag_and_default",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 18.106,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 2095,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4314,
+     "reply_chars": 3189,
+     "reply_tokens": 780,
+     "build_ok": false,
+     "build_seconds": 0.701,
+     "build_error": "/tmp/vibe-jsonl_stats-ail-0-blsgmplo/main.py:112:13: not in the subset: `tag_info[tag] = [1, [amount]]` uses `tag_info` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside), so this is refused. Rewrite: keep the groups in a list of class instances and map each key to its index with a `dict[str, int]`: `@dataclass class G: items: list[str]` `idx: dict[str, int] = {}` `groups: list[G] = []` then `if k not in idx: idx[k] = len(groups); groups.append(G([])) groups[idx[k]].items.append(w)` (or keep ",
+     "compiler": [
+      [
+       "error",
+       "not in the subset: `tag_info[tag] = [1, [amount]]` uses `tag_info` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside)"
+      ],
+      [
+       "note",
+       "the type of a tuple element cannot be told from how it is used; annotate it"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "compiler error:\n/tmp/vibe-jsonl_stats-ail-0-blsgmplo/main.py:112:13: not in the subset: `tag_info[tag] = [1, [amount]]` uses `tag_info` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside), so this is refused. Rewrite: keep the groups in a list of class instances and map each key to its index with a `dict[str, int]`: `@dataclass class G: items: list[str]` `idx: dict[str, int] = {}` `groups: list[G] = []` then `if k not in idx: idx[k] = len(groups); groups.append(G([])) groups[idx[k]].items.append(w)` (or keep parallel lists indexed through the int dict). Original refusal: json.loads(s): the type of the result is not declared here; write the type down: `data: dict[str, int] = json.loads(s)` (the types are int, float, str, bool, list[T], list[list[T]], dict[str, T]) (the general path could not build this program either); general path: str.encode() with the error handler 'surrogatepass' on the general path (built: utf-8, ascii, latin-1; errors strict, ignore, replace)\nnote: /tmp/vibe-jsonl_stats-ail-0-blsgmplo/main.py:1: the type of a tuple element cannot be told from how it is used; annotate it\n"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 8810,
+     "reply_chars": 5041,
+     "reply_tokens": 1315,
+     "build_ok": true,
+     "build_seconds": 17.401,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because json.loads(s): the type of the result is not declared here; write the type down: `data: dict[str, int] = json.loads(s)` (the types are int, float, str, bool, list[T], "
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/jsonl_stats/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "jsonl_stats",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "escapes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_users",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_tag_and_default",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.067,
+   "final_run_seconds": 0.067,
+   "reply_tokens": 477,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2196,
+     "reply_chars": 1920,
+     "reply_tokens": 477,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.067
+    }
+   ],
+   "program": "lab/vibe/programs3/jsonl_stats/python-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "ledger_bin",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "header_only_strict",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_file",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "short_header",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_magic",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_version",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_flags",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_opcode_0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_opcode_6",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_padding",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_zero_padding_id",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_5_bytes_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "varint_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_6_bytes",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_long_valid_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "truncated_in_varint",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_before_check",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_name_len",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_in_name",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_zero",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_33",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_32",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "name_with_space",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_bad_byte_before_truncation",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_del_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "note_truncated",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "note_empty_and_binary",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "check_wrong",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "structural_after_strict_reject",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "strict_no_rejection",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "strict_funds",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "strict_self",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "strict_dup_of_shut",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "reject_order",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "move_exact_balance",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "shut_keeps_balance",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_ties",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_excludes_shut",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_shut",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "extreme_ids_amounts",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reject_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "corrupt0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt1",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt3",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "cut_short",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    }
+   ],
+   "loop_seconds": 15.295,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 2132,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 8860,
+     "reply_chars": 7809,
+     "reply_tokens": 2132,
+     "build_ok": true,
+     "build_seconds": 15.292,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because read_var returns a tuple on one path and a single value on another; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/ledger_bin/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "ledger_bin",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6742,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 240s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 240s"
+    }
+   ],
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "log_levels",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_message",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_line",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_levels",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_spaces",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 1.031,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 376,
+   "surface_error_rounds": 0,
+   "path": "typed",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4145,
+     "reply_chars": 1485,
+     "reply_tokens": 376,
+     "build_ok": true,
+     "build_seconds": 1.028,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/log_levels/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "log_levels",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_message",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_line",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_levels",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_spaces",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.068,
+   "final_run_seconds": 0.068,
+   "reply_tokens": 390,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2027,
+     "reply_chars": 1398,
+     "reply_tokens": 390,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.068
+    }
+   ],
+   "program": "lab/vibe/programs3/log_levels/python-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "matrix_stats",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 1,
+   "other_wrong": 0,
+   "hidden_total": 18,
+   "hidden": [
+    {
+     "name": "empty_input",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "zero_by_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_cols",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_rows",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_row_sum",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "bad_header",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "too_many_rows",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "too_few_cols",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_number",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "overflow_value",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "tabs",
+     "status": "loud_stop",
+     "exit": 2,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 11.745,
+   "final_run_seconds": 0.004,
+   "reply_tokens": 1133,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4148,
+     "reply_chars": 3893,
+     "reply_tokens": 1133,
+     "build_ok": true,
+     "build_seconds": 11.741,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because tok.lstrip(): a bytes has no method 'lstrip' here (or not with these arguments). write instead: use a method that is built, or a loop (this compiler builds only the me"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.004
+    }
+   ],
+   "program": "lab/vibe/programs3/matrix_stats/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "matrix_stats",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 18,
+   "hidden": [
+    {
+     "name": "empty_input",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "zero_by_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_cols",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_rows",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_row_sum",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "bad_header",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "too_many_rows",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "too_few_cols",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_number",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "overflow_value",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.085,
+   "final_run_seconds": 0.085,
+   "reply_tokens": 744,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2030,
+     "reply_chars": 2643,
+     "reply_tokens": 744,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.085
+    }
+   ],
+   "program": "lab/vibe/programs3/matrix_stats/python-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "rail_transfer",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 4,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 21,
+   "hidden": [
+    {
+     "name": "no_queries",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_segments",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "single_station",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "isolated_station",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "stay_on_line_back_and_forth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "transfer_cost_at_start_free",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_times",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "parallel_segments",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "same_line_rejoin",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "fewer_boardings_win_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "self_loops_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_numbers",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "line_ids_sparse",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_medium",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_zero_xfer",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 24.586,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 3524,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4885,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "the model returned no text",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "the model returned no text"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 5020,
+     "reply_chars": 4276,
+     "reply_tokens": 1171,
+     "build_ok": true,
+     "build_seconds": 13.203,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because sys.stdin.buffer.readline: only sys.stdin.read(), sys.stdin.readline() and sys.exit(<int>) are supported, and only as calls; sys.stdin.buffer.readline used as a value "
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [
+      "small",
+      "tie_on_time",
+      "random_small"
+     ],
+     "run_seconds": 0.003,
+     "error_sent": "public case 'small' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\n21 2\n21 2\n18 2\n0 0\nnone\n0 0\n18 2\n\nprogram stderr:\nAttributeError: '_AilStdinBuffer' object has no attribute 'readline'\n\n\npublic case 'tie_on_time' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\n10 1\n10 1\n\nprogram stderr:\nAttributeError: '_AilStdinBuffer' object has no attribute 'readline'\n\n\npublic case 'random_small' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nnone\n0 0\n24 1\n24 1\n29 1\n0 0\nnone\n24 1\n\nprogram stderr:\nAttributeError: '_AilStdinBuffer' object has no attribute 'readline'\n"
+    },
+    {
+     "round": 3,
+     "prompt_chars": 9880,
+     "reply_chars": 4327,
+     "reply_tokens": 1171,
+     "build_ok": true,
+     "build_seconds": 5.701,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because list extend requires a matching list name or literal; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [
+      "small",
+      "tie_on_time",
+      "random_small"
+     ],
+     "run_seconds": 0.003,
+     "error_sent": "public case 'small' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\n21 2\n21 2\n18 2\n0 0\nnone\n0 0\n18 2\n\nprogram stderr:\nUnboundLocalError: cannot access local variable 'heappush' where it is not associated with a value\n\n\npublic case 'tie_on_time' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\n10 1\n10 1\n\nprogram stderr:\nUnboundLocalError: cannot access local variable 'heappush' where it is not associated with a value\n\n\npublic case 'random_small' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nnone\n0 0\n24 1\n24 1\n29 1\n0 0\nnone\n24 1\n\nprogram stderr:\nUnboundLocalError: cannot access local variable 'heappush' where it is not associated with a value\n"
+    },
+    {
+     "round": 4,
+     "prompt_chars": 10021,
+     "reply_chars": 4393,
+     "reply_tokens": 1182,
+     "build_ok": true,
+     "build_seconds": 5.674,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because list extend requires a matching list name or literal; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/rail_transfer/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "rail_transfer",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 21,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2767,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 240s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 240s"
+    }
+   ],
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "scar_life",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 2,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 50,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 5722,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "the model returned no text",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "the model returned no text"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 5857,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 300s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 300s"
+    }
+   ],
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "scar_life",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 50,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3604,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 240s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 240s"
+    }
+   ],
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "tally_lang",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 3,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 72,
+   "hidden": [
+    {
+     "name": "empty_file",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_comments",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf_and_tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "wraparound",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "rotate",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_ops",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "precedence",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "comparison_chain_error",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "comparison_chain_error2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "longest_match",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "longest_match2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "not_equal_token",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "keyword_as_name",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "keyword_in_expr",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "keyword_prefix_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "number_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "number_then_word",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "uppercase",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_char",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_byte_in_comment",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "nul_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "line_1000",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "line_1001",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "long_comment_line",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "trailing_tokens",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "set_double_equals",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "set_missing_expr",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "out_trailing_comma",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "out_empty",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "else_without_when",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "double_else",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "stray_end",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unclosed_blocks",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "break_outside_loop",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "break_in_when_in_loop",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "nesting_16",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "nesting_17",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "parens_32",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "parens_33",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "parens_sequential",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unbalanced_paren",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "long_unary_chain",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "undefined_var",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "div_zero_in_loop",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "mod_zero",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "runtime_error_in_when_header",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "runtime_error_in_loop_header",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "parse_error_beats_runtime",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "parse_error_after_unclosed",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "no_short_circuit",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "loop_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "loop_count_once",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "else_branch",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_bodies",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "global_vars",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "missing_file",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random6",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random7",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random8",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random9",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "random10",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random11",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    }
+   ],
+   "loop_seconds": 19.16,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 4348,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 9001,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "the model returned no text",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "the model returned no text"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 9136,
+     "reply_chars": 2093,
+     "reply_tokens": 635,
+     "build_ok": false,
+     "build_seconds": 0.144,
+     "build_error": "/tmp/vibe-tally_lang-ail-0-kp0sm_ty/main.py:1:1: invalid syntax\n",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "compiler error:\n/tmp/vibe-tally_lang-ail-0-kp0sm_ty/main.py:1:1: invalid syntax\n"
+    },
+    {
+     "round": 3,
+     "prompt_chars": 11284,
+     "reply_chars": 13980,
+     "reply_tokens": 3713,
+     "build_ok": true,
+     "build_seconds": 19.013,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because `f` is a list or dict that gets the bool `True` among other values; Python keeps each element's own type (True / 1). write instead: store bools only, or `int(...)` eve"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/tally_lang/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "term_rank",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 40,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_separator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "separators_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "not_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "cr_separator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "joiners",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "joiner_digits",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "number_terms",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "stop_words",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "suffix_rules",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "suffix_after_join",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "short_tokens",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "non_ascii_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "control_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "ties_bytewise",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_order",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_plus",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_empty",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_not_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_docs_between",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "df_effect",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_tf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random6",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random7",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random8",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random9",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 13.524,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 1235,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6925,
+     "reply_chars": 3968,
+     "reply_tokens": 1235,
+     "build_ok": true,
+     "build_seconds": 13.521,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because make_term returns bytes on one path and a number on another; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/term_rank/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "ticket_audit",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 88,
+   "hidden": [
+    {
+     "name": "valid_no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_header_and_end",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_file",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "header_wrong",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "header_crlf",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "header_only_no_newline",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "missing_end",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "line_after_end",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "empty_line_after_end",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "end_count_wrong",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "end_cents_wrong",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "end_leading_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "end_bad_syntax",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "end_extra_field",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "empty_record_line",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "unknown_type",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "lowercase_type",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "too_few_fields",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "too_many_fields",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "crlf_record",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "tab_in_name",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "name_leading_space",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "name_trailing_space",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "name_inner_spaces_ok",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "name_40",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "name_41",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "name_non_ascii",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "code_lowercase",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "code_4_letters",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "capacity_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "capacity_leading_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "capacity_too_big",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "capacity_max",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "capacity_7_digits",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "venue_duplicate",
+     "status": "pass",
+     "exit": 6,
+     "expected_exit": 6
+    },
+    {
+     "name": "event_check_digit",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "event_5_digits",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "event_unknown_venue",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "event_duplicate",
+     "status": "pass",
+     "exit": 6,
+     "expected_exit": 6
+    },
+    {
+     "name": "event_unknown_venue_and_duplicate",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "syntax_before_value",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "value_before_reference",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "leap_day_ok",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "leap_2000_ok",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "year_2100",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "year_1999",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "month_13",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "day_31_april",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "day_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "hour_24",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "minute_60",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "time_one_digit",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "price_not_multiple_5",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "price_leading_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "price_zero_whole_ok",
+     "status": "pass",
+     "exit": 8,
+     "expected_exit": 8
+    },
+    {
+     "name": "price_one_decimal",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "price_five_digits",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "seat_leading_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "seat_zero",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "seat_4_digits",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "seat_lowercase",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "buyer_short",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "buyer_long",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "buyer_digit_first",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "buyer_upper",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "sale_unknown_event",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "sale_bad_check_digit",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "sale_duplicate_seat",
+     "status": "pass",
+     "exit": 6,
+     "expected_exit": 6
+    },
+    {
+     "name": "sale_duplicate_beats_capacity",
+     "status": "pass",
+     "exit": 6,
+     "expected_exit": 6
+    },
+    {
+     "name": "refund_unsold_seat",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "refund_unknown_event",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "refund_twice",
+     "status": "pass",
+     "exit": 5,
+     "expected_exit": 5
+    },
+    {
+     "name": "missing_file",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "resell_after_refund",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_ties_and_unused_venue",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "mutated0",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "mutated1",
+     "status": "pass",
+     "exit": 4,
+     "expected_exit": 4
+    },
+    {
+     "name": "mutated2",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "mutated3",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    }
+   ],
+   "loop_seconds": 56.981,
+   "final_run_seconds": 0.004,
+   "reply_tokens": 2705,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 8130,
+     "reply_chars": 8803,
+     "reply_tokens": 2705,
+     "build_ok": true,
+     "build_seconds": 56.978,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because a tuple used where a single value is needed. write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`); run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.004
+    }
+   ],
+   "program": "lab/vibe/programs3/ticket_audit/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "todo_file",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 1,
+   "loud_stop": 1,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_newlines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf_text",
+     "status": "silent_wrong",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reuse_after_remove",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "id_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "sort_numeric",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_text_trailing",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_len",
+     "status": "loud_stop",
+     "exit": 1,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 6.139,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 908,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4956,
+     "reply_chars": 4290,
+     "reply_tokens": 908,
+     "build_ok": true,
+     "build_seconds": 6.137,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because `items[tid] = [text, False]` uses `items` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-ke"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/todo_file/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "todo_file",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 1,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_newlines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf_text",
+     "status": "silent_wrong",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reuse_after_remove",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "id_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "sort_numeric",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_text_trailing",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_len",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.054,
+   "final_run_seconds": 0.054,
+   "reply_tokens": 905,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2838,
+     "reply_chars": 3801,
+     "reply_tokens": 905,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.054
+    }
+   ],
+   "program": "lab/vibe/programs3/todo_file/python-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "tree_fold",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 2,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6692,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "the model returned no text",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "the model returned no text"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 6827,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 300s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 300s"
+    }
+   ],
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "version_sort",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "numeric_vs_alpha",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_fewer",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "equal_precedence_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 43.481,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 1351,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4580,
+     "reply_chars": 2052,
+     "reply_tokens": 601,
+     "build_ok": true,
+     "build_seconds": 32.318,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because s.lstrip(): a bytes has no method 'lstrip' here (or not with these arguments). write instead: use a method that is built, or a loop (this compiler builds only the meth"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [
+      "basic",
+      "builds",
+      "invalid"
+     ],
+     "run_seconds": 0.003,
+     "error_sent": "public case 'basic' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nbad 0 sorted 7\n1.2.0-alpha\n1.2.0-alpha.1\n1.2.0-alpha.beta\n1.2.0-beta\n1.2.0\n1.10.0\n2.0.0\n\nprogram stderr:\nValueError: re: the group did not take part in the match (None is not built)\n\n\npublic case 'builds' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nbad 0 sorted 5\n1.0.0-rc.1\n1.0.0-rc.1+meta\n1.0.0\n1.0.0+build.1\n1.0.0+build.9\n\nprogram stderr:\nValueError: re: the group did not take part in the match (None is not built)\n\n\npublic case 'invalid' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nbad 5 sorted 2\n1.0.0+ok\n1.2.3\n\nprogram stderr:\nValueError: re: the group did not take part in the match (None is not built)\n"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 7478,
+     "reply_chars": 2705,
+     "reply_tokens": 750,
+     "build_ok": true,
+     "build_seconds": 11.157,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because parameter `part` of valid_part() gets a list of bools from some calls and a list of numbers from others; Python keeps each element's own type. write instead: pass the "
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/version_sort/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "version_sort",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "numeric_vs_alpha",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_fewer",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "equal_precedence_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.064,
+   "final_run_seconds": 0.064,
+   "reply_tokens": 599,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2462,
+     "reply_chars": 2158,
+     "reply_tokens": 599,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.064
+    }
+   ],
+   "program": "lab/vibe/programs3/version_sort/python-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "word_freq",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "apostrophes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "digits_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top20_cutoff",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "repeat_many",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "mixed_case",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 24.162,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 157,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3630,
+     "reply_chars": 561,
+     "reply_tokens": 157,
+     "build_ok": true,
+     "build_seconds": 24.158,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because import of 'collections' with a use that is not built: Counter, defaultdict (int, float, str, list, lambda: <constant>), OrderedDict and deque are built for str / int /"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/word_freq/ail-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  },
+  {
+   "task": "word_freq",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "apostrophes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "digits_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top20_cutoff",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "repeat_many",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "mixed_case",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.061,
+   "final_run_seconds": 0.061,
+   "reply_tokens": 158,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 1512,
+     "reply_chars": 548,
+     "reply_tokens": 158,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.061
+    }
+   ],
+   "program": "lab/vibe/programs3/word_freq/python-0.py",
+   "model": "opencode/deepseek-v4.1-flash-free"
+  }
+ ],
+ "summary": {
+  "opencode/deepseek-v4.1-flash-free": {
+   "python": {
+    "n": 16,
+    "correct": 9,
+    "public_pass": 10,
+    "gave_up": 6,
+    "silent_wrong": 1,
+    "loud_stop": 0,
+    "other_wrong": 0,
+    "rounds_median": 1.0,
+    "reply_tokens": 5153,
+    "tokens_per_correct": 572.6,
+    "surface_error_rounds": 0,
+    "loop_seconds": 0.66,
+    "final_run_seconds": 0.657,
+    "paths": null
+   },
+   "ail": {
+    "n": 22,
+    "correct": 17,
+    "public_pass": 20,
+    "gave_up": 2,
+    "silent_wrong": 1,
+    "loud_stop": 3,
+    "other_wrong": 0,
+    "rounds_median": 1.0,
+    "reply_tokens": 31610,
+    "tokens_per_correct": 1859.4,
+    "surface_error_rounds": 0,
+    "loop_seconds": 317.38,
+    "final_run_seconds": 0.064,
+    "paths": {
+     "typed": 1,
+     "general": 19,
+     "refused": 0
+    }
+   }
+  }
+ },
+ "ail_errors": {
+  "opencode/deepseek-v4.1-flash-free": [
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because import of 'collections' with a use that is not built: Counter, defaultdict (int, float, str, list, lambda: <constant>), OrderedDict and deque are built for str / int /",
+    "occurrences": 2,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because list extend requires a matching list name or literal; run with --strict to see why",
+    "occurrences": 2,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because the constant None; this language has no null value, so nothing holds one -- build a linked structure as parallel index lists (left[] and right[] of int, -1 where Pytho",
+    "occurrences": 2,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "a list slot that may be None is only read as a list (a method receiver, or the list argument of heappush / heappop / len); reading it as a value would be None in CPython, which this form cannot represent",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because 'balances' is keyed by a str in one place and by something else in another; a dict or a set has one key kind throughout; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because 's' is a str and is being assigned an int; a local's kind is settled by its FIRST assignment and never changes afterwards -- give the second kind a different name, or ",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because `f` is a list or dict that gets the bool `True` among other values; Python keeps each element's own type (True / 1). write instead: store bools only, or `int(...)` eve",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because `items[tid] = [text, False]` uses `items` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-ke",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because `sections[current] = {}` uses `sections` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-key",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because a bytes field inside a tuple in a list is not held; the row is int64 or double fields only; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because a tuple used where a single value is needed. write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`); run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because incompatible class types assigned to rec; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because json.loads(s): the type of the result is not declared here; write the type down: `data: dict[str, int] = json.loads(s)` (the types are int, float, str, bool, list[T], ",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because make_term returns bytes on one path and a number on another; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because parameter `part` of valid_part() gets a list of bools from some calls and a list of numbers from others; Python keeps each element's own type. write instead: pass the ",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because parse_seed returns a list on one path and a number on another; every return path of one function has to hand back the same kind, and this compiler settles that kind on",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because read_var returns a tuple on one path and a single value on another; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because s.lstrip(): a bytes has no method 'lstrip' here (or not with these arguments). write instead: use a method that is built, or a loop (this compiler builds only the meth",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because sys.stdin.buffer.readline: only sys.stdin.read(), sys.stdin.readline() and sys.exit(<int>) are supported, and only as calls; sys.stdin.buffer.readline used as a value ",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because tok.lstrip(): a bytes has no method 'lstrip' here (or not with these arguments). write instead: use a method that is built, or a loop (this compiler builds only the me",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "cannot tell the type of element 1 of this tuple (an empty list or a value of unknown type); give it a name with an annotation",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "cannot tell the type of element 2 of this tuple (an empty list or a value of unknown type); give it a name with an annotation",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "error",
+    "message": "not in the subset: `tag_info[tag] = [1, [amount]]` uses `tag_info` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside)",
+    "occurrences": 1,
+    "fixed_next": 1,
+    "fixed_rate": 1.0
+   },
+   {
+    "kind": "error",
+    "message": "not in the subset: field 'append' requires a class instance (the general path could not build this program either); general path: name 'heappush' is not defined",
+    "occurrences": 1,
+    "fixed_next": 1,
+    "fixed_rate": 1.0
+   },
+   {
+    "kind": "error",
+    "message": "not in the subset: sys.stdin.buffer: only sys.stdin.read(), sys.stdin.readline() and sys.exit(<int>) are supported, and only as calls; sys.stdin.buffer used as a value is not (the general path could not build this progra",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "sys.stdin.buffer used as a value is not built: call it as a statement (sys.stdout.write(text) on its own line, sys.stdin.buffer.read())",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "the type of a tuple element cannot be told from how it is used; annotate it",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   }
+  ]
+ }
+}
