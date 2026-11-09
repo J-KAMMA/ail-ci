@@ -1,3 +1,95 @@
+## 2026-11-08 -- wedge4 review fix: method kernels respect numeric `is` identity (job-rbwedge4-11090021)
+
+The hybrid method wrapper recomputed every statically-written field and stored it back
+unconditionally, so a path that never executed the store (or `self.n = self.n`) replaced the
+attribute object with a fresh box: `c.n is saved` printed `False` where CPython prints `True`.
+The C102 identity guard now covers lifted methods too: when the whole program has a numeric
+`is`/`is not`, every plain-class method stays in CPython with the named reason `the program
+compares numbers with \`is\``, and no method kernel is emitted.  Top-level functions keep the
+existing per-candidate guard, so an unrelated top-level int function is still accelerated.
+Probes under `/tmp/probes/`: `r12_identity` (untouched store, executed store), `r13_alias`
+(alias then store, read-only return), `r22_accel` (conditional/unconditional writes, int/bool/
+float fields, still accelerated), `r23_toplevel_is` (method refused while a top-level function
+is accelerated), `r24_readonly_is`, `r25_bool_float_is` -- all match CPython on the hybrid build;
+`bash ~/tools/cmp.sh` default/general builds match or refuse by name (`C114`).
+Tests on the final commit, `-j 2`: `test_ail_cpython_hybrid`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` -- 4 modules, 0 failed, 220 s.
+
+## 2026-11-08 -- wedge4 re-applied: method kernels, return and parameter kinds (job-rbwedge4-11090021)
+
+Re-applied the accepted `job-wedge4-11082211` change (`fe64ce0d..FETCH_HEAD`, 3 commits) on this
+tree.  The `AIL_CURRENT/ail_cpython_hybrid.py` and `AIL_CURRENT/test_ail_cpython_hybrid.py` hunks
+applied unchanged; the `.github/workflows/agent-worker.yml` hunk (removing the `agent` input and
+the Claude token path) is already present here byte-for-byte, so it was left alone.  The accepted
+original entry and the three review-fix entries (`method calls keep CPython dispatch`,
+`field-overriding subclasses keep methods in CPython`, `non-local MRO bases refuse by name`) are
+kept below and in `AIL_CURRENT/DEVLOG.md`.  `tools/diff_ids.py` is not present on this tree, so
+only `python3 tools/update_manifest.py` ran (`--check` passes).  Probes `w4_*` under `/tmp/probes/`
+all match CPython on the hybrid build; on `bash ~/tools/cmp.sh` default/general builds they match,
+or are refused by name (`attribute access hooks`, `multiple inheritance`,
+`int64 constant expression out of range`).  Tests on the final commit, `-j 2`:
+`test_ail_cpython_hybrid` (16 tests), `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` -- 4 modules, 0 failed, 289 s.
+
+## 2026-11-08 -- wedge4: hybrid-native methods, inferred return and parameter kinds (job-wedge4-11081958)
+
+A method of a plain class (no bases, decorator, `__slots__` or attribute-protocol dunder) is lifted to a
+top-level kernel: `self.<field>` reads and writes become ordinary typed parameters, the generated C wrapper
+reads them from the CPython instance, runs the result kernel and each written field's kernel, and stores the
+new values back through `PyObject_SetAttrString`.  A method may call a read-only method of the same class
+(its needed fields are passed explicitly, in class-declaration order).  Writes are refused unless the stored
+value is proved to be exactly the field's kind (`self.n = True` into an int field stays in CPython), and a
+raising or calling method stays in CPython with a named reason.  Return kinds are now inferred from every
+`return` where they agree, including `and`/`or` (which the old inference left unresolved) only when all
+operands have the same scalar kind.  Parameter kinds come from annotations and from this module's own call
+sites: unannotated constructor arguments (`Q(1)`) fix field kinds, and `self.plus(k)` fixes a method
+parameter; every inferred argument still crosses the C wrapper's exact-type check, so a wrong hint falls back
+to CPython.  Nested functions are not lifted (a method containing one stays in CPython with a named reason).
+
+Two pre-existing defects had to be fixed before any of this could run.  `_trap_patch` defined the index/key
+trap flag `static` in the unit while the wrapper declared it `extern`, so every module with a subscript
+failed to *import* its extension and silently ran pure CPython; the flag now has external linkage, and
+`ail_raise_named(AIL_EXC_INDEX)` (used by list-of-objects/str indexing) is routed to the same per-call
+fallback.  The `str` boundary also scanned the whole string for a non-ASCII byte on every call, which made
+`json_parse.parse_string` O(n^2) (a 40k-item document ran for minutes); it now uses `PyUnicode_IS_ASCII`.
+
+Lab/wedge, `ulimit -v 2500000`, `-j 2`: native top-level functions 29/97 (29.9%) -> 35/97 (36.1%).  The six
+new top-level names are `set_intersect`, `weighted_sum`, `is_simple_email`, `rising_streak`,
+`is_ident_start` and `is_ident_char`; `Frame.rows` and `Parser.parse_string` are new method kernels, so
+`build.json` accelerates 37 callables.  Profiled native self-time share 5.0% (wedge1) -> 13.5% (the profiler
+inflates the Python wrapper, and this run shared a loaded 4-core runner, so the share is indicative).
+Wall-time ratio hybrid/CPython (geomean 1.043x; the extension now really imports, so the per-call boundary
+cost is visible): ast_lint 1.130, bitset_bloom 1.069, csv_parse 0.889, dataframe_group 0.768, edit_dist
+0.921, field_valid 0.938, float_loops 0.967, graph_search 1.120, hashing 1.016, json_parse 1.162, matrix
+1.240, rolling_stats 0.640, sort_rank 0.829, tokenizer 2.874, tree_build 1.096.  `tokenizer` regresses
+because its CPython loops call the now-native two-line `is_ident_start`/`is_ident_char` once per character
+and the ~300 ns wrapper costs more than the Python call it replaces; that is the known prototype boundary
+cost, not a correctness problem.
+
+Top remaining refusal reasons by profiled self-time share (same families as wedge1's `analyse.py`):
+list-return-kind 19.9%, call-can-raise 14.8%, not-a-top-level-function 14.4% (was 20.9%), tuple-parameter
+12.1%, nested-list-annotation 8.0%, list-str-parameter 5.1%, module-constant 3.7%, typed-clone-not-wired
+3.3%, bytes-parameter 2.8%, division-can-raise 2.5%.  Indexing-can-raise is gone (the trap fix makes
+those functions actually native); the raw `unresolved-return` bucket is now only list-returning builders
+(`mat_mul`, `window_sums`, ...), whose kind is outside the scalar return ABI, so step 2's resolvable
+bool/compare returns no longer appear there.
+
+Probes `/tmp/probes/`, each run with `bash ~/tools/cmp.sh <probe> $PWD` (general and default builds) and
+through the hybrid build (`w4_methods.py`: int/bool/str/list fields, negative index, empty list, method
+calling method, two same-typed fields whose order must not swap, aliasing, values through an attribute, a
+list item and a dict value; `w4_returns.py`: `and`/`or` bool and int returns, empty strings, mixed
+int/str and int/float returns refused; `w4_params.py`: annotated, call-site-resolved and conflicting
+parameters, unannotated constructor and method parameter, int64 widths; `w4_widths.py`: values beyond
+int64 through an argument, list item, attribute and dict value).  All match CPython stdout and exit status
+on both builds; `w4_widths.py` is refused by name on the standalone builds (`int64 constant expression out
+of range`) and matches on CPython and the hybrid.
+
+Tests on the final tree, `-j 2`: `test_ail_cpython_hybrid` (13 tests, including the new method/return/param
+cases; the method test also calls the native kernel directly, so an extension that failed to import would
+fail), `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 4 modules, 0 failed, 410 s.
+`test_ail_examples_hybrid` passes on the final code.  `python3 tools/update_manifest.py` regenerated the
+`test_ail_cpython_hybrid.py` pin and `--check` is clean.  No default (non-hybrid) build path changed.
+
 ## 2026-11-08 -- aiknow1: agent-facing AIL material (job-aiknow1-11081958)
 
 Adds `llms.txt` (llmstxt.org shape, under 150 lines), `docs/AGENT_GUIDE.md` (a worked example with a
