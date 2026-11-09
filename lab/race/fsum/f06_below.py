@@ -1,7 +1,7 @@
 """n below the chunk size: one partial chunk of 4095 items."""
 
 def values():
-    return [1.0 / 3.0] * 4095
+    return [1.0 / 3.0 for i in range(0, 4095)]
 
 
 START = 0.0

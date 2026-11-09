@@ -1,7 +1,7 @@
 """n exactly at the chunk size: one full chunk of 4096 items."""
 
 def values():
-    return [1.0 / 3.0] * 4096
+    return [1.0 / 3.0 for i in range(0, 4096)]
 
 
 START = 0.0

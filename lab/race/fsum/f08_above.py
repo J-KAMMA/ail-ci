@@ -1,7 +1,7 @@
 """n just above the chunk size: a full chunk and a one-item chunk."""
 
 def values():
-    return [1.0 / 3.0] * 4097
+    return [1.0 / 3.0 for i in range(0, 4097)]
 
 
 START = 0.0
