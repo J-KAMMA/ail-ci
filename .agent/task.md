@@ -1,3 +1,8 @@
+# CONTINUATION (2026-11-10): the previous run of this job ended with FINAL VERDICT: ERROR, most likely the
+# runner time limit. Your branch already holds the earlier commits: read git log and the DEVLOG first, do NOT
+# redo finished sub-steps, finish the remaining ones, commit and push after each. Keep the run under 4 hours;
+# if a full measurement cannot fit, cut seeds/sizes and say so in the report.
+
 Lane: notice
 
 > Redo of relnotice1, a 0.1 release blocker. It was ACCEPTED, but its re-apply (rbrelnotice1) conflicted twice and was dropped, so integ still lacks it. Redo it from scratch on the CURRENT origin/integ: many new files have landed since (stdlib modules, docs, examples), so the notice list must cover them too. You may read branch job-relnotice1-* for reference, but do not cherry-pick it blindly. Keep the edits small and additive to cut conflicts.
