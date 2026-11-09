@@ -6,7 +6,7 @@ batches, red-alone jobs, culprit-unavailable events, and red-to-resolution hours
 modules that broke. The fixture `lab/dogfood/gatestats/fixture/ci_integ.out` is the 400-line task
 excerpt plus three noise lines; `expected.out` is the CPython reference.
 
-The tool works: CPython and the native binary are byte-identical on the fixture and on 9 probes
+The tool works: CPython and the native binary are byte-identical on the fixture and on 11 probes
 (day rollover, empty/noise input, unresolved red, multiple reds before a candidate, culprit-only,
 shared-file merge, top-5 truncation), with both the default and the forced general build. The
 `--strict` build succeeds (same 98,888-byte binary and SHA-256 as default), so the typed path built

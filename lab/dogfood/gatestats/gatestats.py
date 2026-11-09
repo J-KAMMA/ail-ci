@@ -8,8 +8,9 @@ starts the next day) the report has:
   events, and the hours from every red event to its resolution.
 A red event is a `red:` line (not `red alone:`); a red-alone event is a
 `red alone:` line.  Its resolution is the next `candidate` or `merged` line.
-The top modules are the jobs named after `broken by` plus the jobs on
-`red alone:` lines, by count.
+The top modules are the module names: the name before `broken by` on a
+`red:` line, otherwise the names in the parenthesised test list.  They are
+ordered by count then name.
 """
 import sys
 from dataclasses import dataclass
@@ -39,6 +40,25 @@ def count_jobs(rest: str) -> int:
     if text == "":
         return 0
     return len(text.split())
+
+
+def module_names(message: str) -> list[str]:
+    names: list[str] = []
+    after = message[message.find(": ") + 2:]
+    idx = after.find(" broken by ")
+    if idx >= 0:
+        name = after[0:idx].strip()
+        if name != "":
+            names.append(name)
+        return names
+    open_paren = after.find("(")
+    if open_paren >= 0:
+        tail = after[open_paren + 1:]
+        close_paren = tail.find(")")
+        if close_paren >= 0:
+            for module in tail[0:close_paren].split():
+                names.append(module)
+    return names
 
 
 @dataclass
@@ -98,27 +118,19 @@ def main() -> int:
             else:
                 cur.merged_jobs += count_jobs(rest)
         elif message.startswith("red alone: "):
-            rest = message[message.find(": ") + 2:]
             cur.red_alone += 1
             pending_day.append(day)
             pending_abs.append(day * 86400 + ts)
             pending_alone.append(1)
-            job = rest.strip().split()[0]
-            counts[job] = counts.get(job, 0) + 1
+            for module in module_names(message):
+                counts[module] = counts.get(module, 0) + 1
         elif message.startswith("red: "):
             cur.red_batches += 1
             pending_day.append(day)
             pending_abs.append(day * 86400 + ts)
             pending_alone.append(0)
-            idx = message.find(" broken by ")
-            if idx >= 0:
-                tail = message[idx + 11:]
-                end = tail.find(" (")
-                if end >= 0:
-                    job = tail[0:end]
-                else:
-                    job = tail.split()[0]
-                counts[job] = counts.get(job, 0) + 1
+            for module in module_names(message):
+                counts[module] = counts.get(module, 0) + 1
         elif message.startswith("culprit.yml unavailable"):
             cur.culprit += 1
 

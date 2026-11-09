@@ -8,8 +8,8 @@ day 7 candidates=32 merged_jobs=56 red_batches=1 red_alone=2 culprit_unavailable
 day 8 candidates=28 merged_jobs=21 red_batches=0 red_alone=4 culprit_unavailable=0 red_batch_hours=- red_alone_hours=0.22,0.08,0.08,0.14
 day 9 candidates=17 merged_jobs=16 red_batches=5 red_alone=1 culprit_unavailable=5 red_batch_hours=0.01,0.01,0.06,0.01,0.07 red_alone_hours=0.07
 top modules:
-1. setord1 2
-2. decexact2 1
-3. err2 1
-4. fbnarrow3 1
-5. fbred4_rr2 1
+1. test_ail_packaging 4
+2. test_ail_bigint 3
+3. test_ail_docs_site 2
+4. test_ail_hostile_input 2
+5. test_ail_par_reduce_rt 2

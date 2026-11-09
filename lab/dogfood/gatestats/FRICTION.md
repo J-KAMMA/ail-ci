@@ -14,9 +14,10 @@ The program reads the log path from `argv[1]`. A timestamp smaller than the prev
 the next day. Per day it prints candidates (`candidate` lines), merged jobs (sum of job names on
 `merged` lines), red batches (`red:` lines that are not `red alone:`), red-alone jobs (`red alone:`
 lines), culprit-unavailable lines, and the hours from each red event to the next `candidate` or
-`merged` line. Red-batch and red-alone durations are listed separately. Top modules are the jobs
-named after `broken by` plus the jobs on `red alone:` lines, ordered by count then name; at most five
-are printed. An unresolved red event at end of file is reported on a final line.
+`merged` line. Red-batch and red-alone durations are listed separately. Top modules are the test
+modules: the name before `broken by` on a `red:` line, otherwise the names in the parenthesised test
+list (on `red:` and `red alone:` lines). They are ordered by count then name; at most five are
+printed. An unresolved red event at end of file is reported on a final line.
 
 ## Friction rounds (write -> compile -> fix)
 
@@ -49,9 +50,10 @@ the point here is equality of output and the native binary, not a benchmark clai
 
 ## Probes
 
-Each probe was run with `bash ~/tools/cmp.sh /tmp/probes/gatestats/<p>.py $PWD`, which diffs both the
-forced-general build (`g`) and the default build (`d`) against CPython. All produced `g same stdout`
-and `d same stdout`, exit 0.
+Each committed probe under `lab/dogfood/gatestats/probes/` was run with
+`bash ~/tools/cmp.sh lab/dogfood/gatestats/probes/<p>.py $PWD`, which diffs both the forced-general
+build (`g`) and the default build (`d`) against CPython. All 11 produced `g same stdout` and
+`d same stdout`, exit 0.
 
 | Probe | Boundary covered |
 |---|---|
@@ -59,13 +61,24 @@ and `d same stdout`, exit 0.
 | `basic.py` | candidate/merge, a retry-in-halves batch, a red-alone job |
 | `rollover.py` | red at 23:59:30 resolved by a candidate at 00:00:30 (next day) |
 | `reds.py` | two red events before one candidate; first/second duration |
+| `multi_red.py` | two `red:` lines before one resolution; each duration listed |
 | `culprit.py` | culprit-unavailable count and a `merged ... here (shared-file conflicts resolved)` line |
 | `nodesc.py` | red event with no later candidate/merge (unresolved at EOF) |
 | `empty.py` | empty file (no days, no modules) |
 | `noise.py` | noise-only file (no timestamped lines) |
 | `topmany.py` | more than five modules, ties, top-5 truncation |
+| `modules.py` | module names from `broken by`, `red alone: (m1 m2)` and a parenthesised retry list; not the jobs |
 
 Also checked: running with no argument gives the same usage text on stderr and exit 2 in both builds.
+
+## Review fix (defect 1)
+
+The first version counted the jobs named after `broken by` and on `red alone:` lines. The task asks
+for the modules that broke. `record_modules` now takes the name before `broken by`, otherwise the
+names in the parenthesised test list. On the fixture this gives
+`test_ail_packaging 4 / test_ail_bigint 3 / test_ail_docs_site 2 / test_ail_hostile_input 2 /
+test_ail_par_reduce_rt 2`, as required. The `modules.py` probe checks the same split. All probes were
+re-run on both builds after the change.
 
 ## Required AIL tests
 
