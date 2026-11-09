@@ -25,6 +25,60 @@ Probes in `/tmp/probes` on both builds via `cmp.sh`: `fz243` (the seed) matches;
 also match.  `sanity_utf` (non-BMP `bytes.decode`) and `sanity_int` (`int('9999999999999999999')`)
 are refused by name (`not in the subset`, `int64 constant expression out of range`), as documented.
 No other differences were seen in this reproducer.
+## 2026-11-08 -- pypy1: PyPy arm in compare_rival and wedge (job-pypy1-11090337; branch job-pypy1-11090659)
+
+Measurement only, no compiler change.  `lab/compare_rival/run.py` gains a `pypy` row per task
+(`src/<task>/main.py`, prebuilt **PyPy 7.3.23 / Python 3.11.15**, tarball pinned with its published
+sha256 in `toolchains.env`): compile time is `-`, the build-disk cell is the interpreter install
+marked `interpreter`, and a `warm5` column (`pypy_warm.py`, the 5th run inside one process) sits next
+to the plain cold wall time.  `lab/wedge/measure.py` runs each corpus `run.py` under PyPy five times
+and compares every stdout byte with the committed CPython oracle; `report.py` renders PyPy/CPython,
+hybrid/PyPy and standalone/PyPy.
+
+Results.  Wedge: PyPy/CPython **0.159x**, hybrid/PyPy **6.197x** (0/15 modules faster), standalone/PyPy
+**0.829x** (8/13); PyPy output byte-identical on **15/15**.  compare_rival: AIL typed/main vs PyPy
+**9/10** wins, **0.313x** on the plain cold column; against `warm5` **8/10**, geomean **0.430x**, so the
+cold headline is the harsher comparison for PyPy (the report now says both).
+
+Fix pass (review 1): `render()` emitted a 12-column separator and `build refused` row under an
+11-column header (11 under 10 without PyPy) -- both now match the header, and `RESULTS.md` was
+regenerated from `results.json`.  `TOOLCHAIN` now maps `pypy` to the interpreter version, so
+`layer_base` keeps a measured PyPy row when this run has no interpreter instead of overwriting it
+with a failed build and claiming `source: 'this run'`.  `_first_diff` reports a trailing-newline-only
+difference (it returned `None` because `splitlines()` hid it), so `pypy_diff` is never null on a
+mismatch.  Manifest regenerated; `update_manifest.py --check` is clean.
+
+Probes `/tmp/probes_pypy1/repro.py`: header/separator/refused rows **11/11/11** with PyPy and
+**10/10/10** without; `layer_base` with PyPy missing keeps `wall_ms=2000.0`, `source='base'`;
+`_first_diff(b'ok\n', b'ok')` returns `"stdout line 1: CPython ends 'ok\\n' / PyPy ends 'ok'"`.
+Tests on the final tree: `test_ail_pypy_lab` 22, `test_ail_safetynet` 5, `test_ail_files` 18
+(1 skipped), `test_ail_corpus_findings3` 2 -- all OK.
+## 2026-11-08 -- obs2 re-applied: hybrid trap units load, C vectorcall entry (job-rbobs2-11090836)
+
+Re-applied the accepted `job-obs2-op1109` change (diff of `eb8b28cf`..`FETCH_HEAD`) on this tree: 18
+files, 6,109 insertions / 26 deletions (excluding `.agent`, `corpus`, `MANIFEST.json`). Two files
+conflicted in the three-way apply, both because the tree already carried obs1's version and the
+target adds obs2 on top of it: `docs/design/OBSERVED_TYPES.md` (the obs2 results paragraph) and
+`lab/wedge/observe_probe.py` (`--configs`, `native_loaded`). Both sides' fixes are kept — `HEAD`'s
+copies were byte-identical to obs1's commit `1c1e8b2f`, so the resolved files equal the target
+exactly and nothing else changed. New: `AIL_CURRENT/ail_observe.py`, `test_ail_observe.py`,
+`tests.d/test_ail_observe.txt`, `lab/wedge/guard_cost_obs2.json`, `obs2_hand_task{0,1}.json`.
+`tools/diff_ids.py` is not present on this tree, so only `python3 tools/update_manifest.py` ran; it
+found the pins already current and `--check` exits 0.
+
+Behaviour: the trap flag gains external linkage (indexing units import), an uncaught runtime raise
+falls back to the original instead of `_Exit(1)`, `build --cpython` imports every `.so` before
+listing a function and drops a broken extension, and CPython 3.12+ installs a per-unit C vectorcall
+entry on the original function object (guards, defaults, keywords and overflow fall back in C).
+
+Tests on this commit, `-j 2`: `test_ail_cpython_hybrid`, `test_ail_observe`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` -- 5 modules, 0 failed, 415 s. Probes: five
+`/tmp/probes/hc_*.py` programs under `cmp.sh` (general and default builds; two match, three are
+refused by name: too many positional arguments, int64 constant out of range, function-as-value) and
+five `hb_*_mod.py`+`hb_*_run.py` module/runner pairs through `ail build --cpython`, all matching
+CPython stdout and exit with every accelerated function reporting `_ail_is_native` true (basic
+types/defaults/keywords/arity, int64 overflow through an argument, list item, dict value and
+attribute, indexing and dict traps, nested `a[n][m]`, channels and aliasing).
 
 ## 2026-11-08 -- aiknow1: agent-facing AIL material (job-aiknow1-11081958)
 
@@ -235,6 +289,67 @@ needed.  The only edit is defensive: `test_ail_selfhost_parse.py` now widens the
 `len(texts) == 200`; on today's corpus the stride already yields 200, so the test is unchanged.
 Tests on the final commit: `test_ail_selfhost_parse` (5/5), `test_ail_safetynet`, `test_ail_files`,
 `test_ail_corpus_findings3`; `python3 tools/update_manifest.py` then `--check`.
+## 2026-11-08 -- rbsetord2 review fixes: set pop finger, difference heuristic, frozenset keys (job-rbsetord2_rr1-11081819)
+
+The review of the re-applied setord2 emulation found three wrong orders inherited from the accepted
+change. All are fixed in `python/pkg-v12/cruntime.py`:
+
+- **Pop finger.** `fin` is a CPython-table slot cursor when `co` is live, but `ail_setx_rebuild`
+  recomputed it from dense-entry indices and used that value, so a `pop()` followed by an `add`
+  that reused the freed dummy slot made the next `pop()` return the re-added key. The rebuild now
+  keeps the old slot cursor whenever the CPython table is live and only remaps it for the
+  insertion-order body. A table resize keeps the numeric cursor, as CPython's `set_table_resize`
+  does (it does not reset `finger`).
+- **Difference.** `ail_setx_difference` and typed `ail_iset_minus` always filtered into a fresh set.
+  They now take CPython's `set_difference` copy-and-delete path when `len(a)>>2 > len(b)`, keeping
+  a's table layout; `difference_update` follows the same layout and dummy-resize rule.
+- **Frozenset keys.** `ail_setx_det` treated a `frozenset` as non-deterministic, so a set of
+  frozensets silently fell back to insertion order. It now recurses into the frozenset's elements;
+  `ail_frozenset_hash` already reproduces CPython's deterministic mix, so those sets (and tuples
+  holding frozensets) walk and pop in CPython's order.
+
+`test_ail_setorder.py` gains S8 (pop after mutation/growth/clear), S9 (boxed and typed difference
+across both sides of the threshold) and S10 (sets of frozensets, tuples of frozensets, nested
+frozensets, empty/negative/64-bit elements). DIFFERENCES gains the review row and extends A2 /
+the setord2 row to frozensets; `tools/update_manifest.py` regenerated the `cruntime.py` and
+`test_ail_setorder.py` pins and `--check` passes (`tools/diff_ids.py` is absent on this tree).
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, general and default, all match CPython 3.12):
+`/tmp/probes/p_pop_boundary.py` (pop then add, growth, clear, difference_update dummies,
+negative/64-bit values, argument/list-item/attribute/dict-value routes, empty KeyError),
+`p_typed_pop_boundary.py` (typed growth and dummy cleanup), `p_diff_boundary.py` (both sides of
+`len(a)>>2 > len(b)`, empty/self, negatives, non-set iterable, multiple arguments, frozenset),
+`p_typed_diff_boundary.py`, `p_frozen_boundary.py` (empty/negative/64-bit leaves, bool/None/float,
+nested frozensets, tuples, routes, add/discard); the reviewer's `p_min1`, `p_finger`,
+`p_typed_finger`, `p_ops2`, `p_typed_ops` and `p_frozen_keys` also re-run 6/6 matching.
+
+Tests (`tools/par_check.py -j 2`): `test_ail_setorder`, `test_ail_sets_general`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 5 modules, 0 failed.
+
+## 2026-11-08 -- rbsetord2 re-applied: CPython set order emulation on the current tree (job-rbsetord2_rr1-11081819)
+
+Re-applied the accepted `job-setord2-11080819` change (`fd0162e..c7a948e8`) on this tree; its diff no
+longer applied because setord1 had since been integrated. The setord2 branch `job-rbsetord2-11081135`
+had no work commits, only its export. The conflict between the setord1 refusal tests and setord2's
+emulation was resolved in favour of setord2 (the change removes the refusal path for deterministic-hash
+sets); the later `setord1` singleton pop fix was superseded by the table pop. The accepted code, test,
+DIFFERENCES and `docs/spec/DIFFERENCES.md` hunks are applied; newer unrelated rows and files on this
+tree are kept.
+
+- `cruntime.py`, `pyboxed2.py`, `pyfunc.py`: CPython 3.12 set table emulation (rehash placement from
+  the original slot) and tuple-display constant folding; unannotated int/str set pop and walk rules.
+- `test_ail_setorder.py` gains the 40 x 128 growth case and six-tuple display; `test_ail_sets_general`
+  test_s3 now compares the walk with CPython.
+- `tools/diff_ids.py` is not present on this tree, so only `tools/update_manifest.py` ran; pins for
+  `cruntime.py`, `pyboxed2.py`, `pyfunc.py`, `test_ail_setorder.py` and `test_ail_sets_general.py`
+  were regenerated and `--check` passes.
+
+Final commit tests (`tools/par_check.py -j 2`): `test_ail_setorder`, `test_ail_sets_general`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 5 modules, 0 failed.
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, general and default): `p_coll2` (40 x 128 growth, deletions,
+pop), `p_typed_dense` (annotated set[int]), `p_tuple` / `p_tuple_rt` (tuple displays, empty/nested/
+float/bool/None tuples, through an argument, list item, attribute, dict value and alias), `p_pop_empty`
+(empty/singleton/tuple pop), `p_frozen`, `p_str_order_free` and `p_set_display` -- all match CPython.
 
 ## 2026-11-08 -- err2_fix1: legacy SDK discovery carries the compiler-imported error module (job-err2_fix1-11080948)
 

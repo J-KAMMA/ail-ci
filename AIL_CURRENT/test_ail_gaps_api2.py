@@ -484,11 +484,165 @@ POP0 = 'from collections import deque, Counter\n\n\ndef f_pop(x):\n    return x.
 
 SET_POP = "def gen(s):\n    return s.pop()\n\n\ndef main():\n    a = {1, 2}\n    print(a.pop(), a)\n    c = {5}\n    print(c.pop(), c)\n    print(gen({1, 2}), gen({2, 4, 6}))\n    d = set()\n    for i in range(6):\n        d.add(i * 3)\n    out = []\n    while d:\n        out.append(d.pop())\n    print(out)\n    e = {3, 1, 2}\n    e.discard(3)\n    e.add(3)\n    print(e.pop(), e.pop(), e.pop())\n    f = {'only'}\n    print(f.pop(), len(f))\n    try:\n        gen(set())\n    except KeyError as ex:\n        print('KE', ex)\n\n\nmain()\n"
 
-# a model of the insertion order is kept in a list; every pop must return the first element of the model (the general
-# path through a function, a local set of ints and of strs in the default build); the last lines drain a large set
-SET_POP_MODEL = "def lcg(x):\n    return (x * 1103515245 + 12345) % 2147483648\n\ndef run_int(seed, n):\n    s = set()\n    model = []\n    x = seed\n    bad = 0\n    for step in range(n):\n        x = lcg(x)\n        op = (x >> 8) % 7\n        v = (x >> 12) % 40\n        if op <= 2:\n            if v not in s:\n                model.append(v)\n            s.add(v)\n        elif op == 3:\n            if v in s:\n                model.remove(v)\n            s.discard(v)\n        elif op <= 5:\n            if s:\n                a = s.pop()\n                b = model[0]\n                model.remove(a)\n                if a != b:\n                    bad += 1\n        else:\n            if len(s) != len(model):\n                bad += 100\n            if list(s) != model:\n                bad += 1000\n    return bad, len(s)\n\ndef run_str(seed, n):\n    s = set()\n    model = []\n    x = seed\n    bad = 0\n    for step in range(n):\n        x = lcg(x)\n        op = (x >> 8) % 7\n        v = 'k' + str((x >> 12) % 40)\n        if op <= 2:\n            if v not in s:\n                model.append(v)\n            s.add(v)\n        elif op == 3:\n            if v in s:\n                model.remove(v)\n            s.discard(v)\n        elif op <= 5:\n            if s:\n                a = s.pop()\n                b = model[0]\n                model.remove(a)\n                if a != b:\n                    bad += 1\n        else:\n            if list(s) != model:\n                bad += 1000\n    return bad, len(s)\n\ndef gen_pop(s):\n    return s.pop()\n\ndef run_gen(seed, n):\n    s = set()\n    model = []\n    x = seed\n    bad = 0\n    for step in range(n):\n        x = lcg(x)\n        op = (x >> 8) % 7\n        v = (x >> 12) % 40\n        if op <= 2:\n            if v not in s:\n                model.append(v)\n            s.add(v)\n        elif op == 3:\n            if v in s:\n                model.remove(v)\n            s.discard(v)\n        elif op <= 5:\n            if s:\n                a = gen_pop(s)\n                b = model[0]\n                model.remove(a)\n                if a != b:\n                    bad += 1\n        else:\n            if list(s) != model:\n                bad += 1000\n    return bad, len(s)\n\ndef drain(n):\n    s = set()\n    for i in range(n):\n        s.add(i * 7 + 3)\n    t = 0\n    c = 0\n    while s:\n        t += s.pop()\n        c += 1\n    return t, c\n\ndef work(n):\n    s = {0}\n    seen = 0\n    total = 0\n    while s and seen < n:\n        x = s.pop()\n        seen += 1\n        total += x\n        s.add(x + 1)\n        s.add(x + 2)\n        s.discard(x + 1)\n    return total, len(s)\n\ndef main():\n    bad = 0\n    for seed in range(1, 40):\n        bad += run_int(seed, 400)[0] + run_str(seed, 400)[0] + run_gen(seed, 400)[0]\n    print(bad)\n    print(drain(100000))\n    print(work(20000))\n\nmain()\n"
 
-SET_POP_TYPED = "def run(seed, n):\n    s = set()\n    t = set()\n    ms = []\n    mt = []\n    x = seed\n    bad = 0\n    for step in range(n):\n        x = (x * 1103515245 + 12345) % 2147483648\n        op = (x >> 8) % 6\n        v = (x >> 12) % 30\n        k = 'k' + str(v)\n        if op <= 2:\n            if v not in s:\n                ms.append(v)\n                mt.append(k)\n            s.add(v)\n            t.add(k)\n        elif op == 3:\n            if v in s:\n                ms.remove(v)\n                mt.remove(k)\n            s.discard(v)\n            t.discard(k)\n        elif len(s) > 0:\n            a = s.pop()\n            b = t.pop()\n            if a != ms[0] or b != mt[0]:\n                bad += 1\n            ms.pop(0)\n            mt.pop(0)\n        if step % 50 == 0:\n            q1 = []\n            for q in s:\n                q1.append(q)\n            q2 = []\n            for q in t:\n                q2.append(q)\n            if q1 != ms or q2 != mt:\n                bad += 1000\n    return bad\n\ndef main():\n    tot = 0\n    for seed in range(1, 60):\n        tot += run(seed, 600)\n    print(tot)\n\nmain()\n"
+# set.pop() now follows CPython's table order for deterministic int sets (gdev C113): the popped
+# element and the remaining iteration order both match, including when the set reaches pop
+# through a function argument. The rolling hash makes a wrong pop order visible without a model.
+SET_POP_TABLE = '''def lcg(x):
+    return (x * 1103515245 + 12345) % 2147483648
+
+
+def run_int(seed, n):
+    s = set()
+    h = 0
+    pops = 0
+    x = seed
+    for step in range(n):
+        x = lcg(x)
+        op = (x >> 8) % 7
+        v = (x >> 12) % 40
+        if op <= 2:
+            s.add(v)
+        elif op == 3:
+            s.discard(v)
+        elif op <= 5:
+            if s:
+                h = (h * 1000003 + s.pop()) % 1000000007
+                pops += 1
+        else:
+            h = (h * 1000003 + len(s)) % 1000000007
+            for q in s:
+                h = (h * 1000003 + q) % 1000000007
+    return h, pops, len(s)
+
+
+def gen_pop(s):
+    return s.pop()
+
+
+def run_gen(seed, n):
+    s = set()
+    h = 0
+    pops = 0
+    x = seed
+    for step in range(n):
+        x = lcg(x)
+        op = (x >> 8) % 7
+        v = (x >> 12) % 40
+        if op <= 2:
+            s.add(v)
+        elif op == 3:
+            s.discard(v)
+        elif op <= 5:
+            if s:
+                h = (h * 1000003 + gen_pop(s)) % 1000000007
+                pops += 1
+        else:
+            h = (h * 1000003 + len(s)) % 1000000007
+            for q in s:
+                h = (h * 1000003 + q) % 1000000007
+    return h, pops, len(s)
+
+
+def drain(n):
+    s = set()
+    for i in range(n):
+        s.add(i * 7 + 3)
+    t = 0
+    c = 0
+    while s:
+        t += s.pop()
+        c += 1
+    return t, c
+
+
+def work(n):
+    s = {0}
+    seen = 0
+    total = 0
+    while s and seen < n:
+        x = s.pop()
+        seen += 1
+        total += x
+        s.add(x + 1)
+        s.add(x + 2)
+        s.discard(x + 1)
+    return total, len(s)
+
+
+def main():
+    for seed in range(1, 20):
+        print(run_int(seed, 400))
+    for seed in range(1, 20):
+        print(run_gen(seed, 400))
+    print(drain(100000))
+    print(work(20000))
+
+
+main()
+'''
+
+SET_POP_TABLE_TYPED = '''def lcg(x):
+    return (x * 1103515245 + 12345) % 2147483648
+
+
+def gen_pop(s: set[int]) -> int:
+    return s.pop()
+
+
+def run(seed, n):
+    s: set[int] = set()
+    h = 0
+    pops = 0
+    x = seed
+    for step in range(n):
+        x = lcg(x)
+        op = (x >> 8) % 6
+        v = (x >> 12) % 30
+        if op <= 2:
+            s.add(v)
+        elif op == 3:
+            s.discard(v)
+        elif len(s) > 0:
+            h = (h * 1000003 + s.pop()) % 1000000007
+            pops += 1
+        if step % 50 == 0:
+            h = (h * 1000003 + len(s)) % 1000000007
+            for q in s:
+                h = (h * 1000003 + q) % 1000000007
+    return h, pops, len(s)
+
+
+def run_gen(seed, n):
+    s: set[int] = set()
+    h = 0
+    pops = 0
+    x = seed
+    for step in range(n):
+        x = lcg(x)
+        op = (x >> 8) % 6
+        v = (x >> 12) % 30
+        if op <= 2:
+            s.add(v)
+        elif op == 3:
+            s.discard(v)
+        elif len(s) > 0:
+            h = (h * 1000003 + gen_pop(s)) % 1000000007
+            pops += 1
+        if step % 50 == 0:
+            h = (h * 1000003 + len(s)) % 1000000007
+            for q in s:
+                h = (h * 1000003 + q) % 1000000007
+    return h, pops, len(s)
+
+
+def main() -> None:
+    for seed in range(1, 20):
+        print(run(seed, 600), run_gen(seed, 600))
+
+
+main()
+'''
 
 
 class StrArgs(unittest.TestCase):
@@ -509,18 +663,12 @@ class ArityByType(unittest.TestCase):
 
 class SetPop(unittest.TestCase):
     @unittest.skipUnless(HAVE_CC, 'needs gcc')
-    def test_pop_is_refused_by_name(self):
-        # `set.pop()` returns an element in iteration order, which AIL cannot reproduce, so every
-        # shape is refused (at compile time where the receiver is a provable set, else at run time).
-        for name, text in (('first', SET_POP), ('model', SET_POP_MODEL), ('typed', SET_POP_TYPED)):
-            for general in (True, False):
-                with tempfile.TemporaryDirectory(prefix='ail-gaps2-') as directory:
-                    got, err = _build_run(directory, '%s%d' % (name, general), text, general)
-                if got is None:
-                    self.assertIn('set', err.lower(), '%s (general=%s)' % (name, general))
-                else:
-                    self.assertNotEqual(got[1], 0, '%s (general=%s)' % (name, general))
-                    self.assertIn('set', (got[2] or '').lower(), '%s (general=%s)' % (name, general))
+    def test_pop_matches_cpython(self):
+        # `set.pop()` returns the first element in CPython's iteration order. Deterministic int
+        # sets emulate CPython's table, so the general and default builds match its pop and walk.
+        check_program(self, 'setpop', SET_POP)
+        check_program(self, 'setpop_table', SET_POP_TABLE)
+        check_program(self, 'setpop_typed', SET_POP_TABLE_TYPED)
 
 if __name__ == '__main__':
     unittest.main()

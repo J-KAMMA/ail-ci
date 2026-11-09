@@ -119,6 +119,24 @@ most of the saving. (`tokenizer` and `edit_dist` missed for the load defect in s
 the boundary.) A C entry with in-C scalar guards (vectorcall, no Python frame) should bring G
 to tens of ns; that is the estimate to verify, not a measurement.
 
+**obs2 (tasks 0 and 1 done).** Task 0 made the trap units load and the build now imports every
+`.so` it writes before build.json may list a function. Task 1 replaced the two Python frames with a
+C vectorcall entry installed on the original function object (`PyFunction_SetVectorcall`, 3.12+;
+older CPython keeps the Python wrapper). Guards run in C; keywords, a wrong argument count, a
+guard failure, an overflow or a trap call the unaltered `_PyFunction_Vectorcall` with the same
+arguments; missing arguments are filled from the current `__defaults__`; a replaced `__code__`
+runs in CPython. The function object, its identity and introspection are CPython's own. Measured
+(`guard_cost_obs2.json`, instructions per call from `tools/icount.c` loops): `add1` 75.8 ns vs
+34.6 ns CPython (was 406 vs 45), +465 instructions per call over CPython (was ~3,800), of which
+~40 ns is releasing the GIL for a scalar-only call (`total([])`, which keeps the GIL, costs 33 ns);
+`work(1)` is already cheaper than CPython (1,649 vs 1,754 instructions), so break-even is below one
+loop iteration (was ~10); the int64-overflow fallback costs 66 ns vs 53 ns (was 1.24 us). Profilers
+(`sys.setprofile`) no longer see a call that ran natively. Corpus, `hand`, instructions vs CPython
+(`obs2_hand_task0.json` -> `obs2_hand_task1.json`): 29/29 natives load; `field_valid` 0.965 ->
+0.658 (share bound 0.493, 67% of it achieved), corpus 0.957 -> 0.934 (1.071x, 89% of the 1.080x
+bound); every other module within icount noise (+-1.3%; `hashing`, with no native function,
+moved 0.992 -> 1.005); all outputs byte-identical.
+
 ## 4. Step 3 split into tasks of at most 2 hours, ranked by measured gain
 
 0. **Load the trap units** (minutes): drop `static` from the trap flag in `_trap_patch`, and make

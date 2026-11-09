@@ -1,0 +1,2837 @@
+[
+ {
+  "all_defs": [
+   "count_ints",
+   "count_tag",
+   "has_tag",
+   "leaves",
+   "max_depth",
+   "node_count",
+   "sum_ints"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 2.21,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "count_ints": "unresolved-param: node stays in CPython",
+     "count_tag": "to_c-refused: 'node' is annotated tuple in the source, but the caller also supplies str; refusing rather than silently choosing one.\n  write instead: make the annotation matc stays in CPython",
+     "has_tag": "to_c-refused: 'node' is annotated tuple in the source, but the caller also supplies str; refusing rather than silently choosing one.\n  write instead: make the annotation matc stays in CPython",
+     "leaves": "unresolved-param: node stays in CPython",
+     "max_depth": "unresolved-param: node stays in CPython",
+     "node_count": "unresolved-param: node stays in CPython",
+     "sum_ints": "unresolved-param: node stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_ints",
+   "count_tag",
+   "has_tag",
+   "leaves",
+   "max_depth",
+   "node_count",
+   "sum_ints"
+  ],
+  "icount": {
+   "cpython": 27718645692,
+   "hand": 27732308160
+  },
+  "module": "ast_lint",
+  "observe_same_output": true,
+  "profile": {
+   "count_ints": {
+    "big": {},
+    "calls": 955710,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 9525,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 153,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 55,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 4663,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 1544
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.860841
+   },
+   "count_tag": {
+    "big": {},
+    "calls": 955710,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 9525,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 153,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 55,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 4663,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 1544
+     },
+     "tag": {
+      "str": 15940
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.920899
+   },
+   "has_tag": {
+    "big": {},
+    "calls": 525,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 35,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 35,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 210,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 35,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 210
+     },
+     "tag": {
+      "str": 525
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 169
+    },
+    "self_s": 0.004004
+   },
+   "leaves": {
+    "big": {},
+    "calls": 955710,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 9525,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 153,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 55,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 4663,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 1544
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.844825
+   },
+   "max_depth": {
+    "big": {},
+    "calls": 955710,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 9525,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 153,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 55,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 4663,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 1544
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.800782
+   },
+   "node_count": {
+    "big": {},
+    "calls": 955710,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 9525,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 153,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 55,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 4663,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 1544
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.756739
+   },
+   "sum_ints": {
+    "big": {},
+    "calls": 955710,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 9525,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 153,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 55,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 4663,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 1544
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.884864
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "bloom_probe",
+   "bloom_set",
+   "make_hashes",
+   "multiples",
+   "popcount",
+   "rotate_xor",
+   "set_intersect"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "popcount",
+     "rotate_xor"
+    ],
+    "build_rc": 0,
+    "build_s": 3.71,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "popcount",
+     "rotate_xor"
+    ],
+    "rejected": {
+     "bloom_probe": "division or power can raise",
+     "bloom_set": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "make_hashes": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "multiples": "division or power can raise",
+     "set_intersect": "the list parameter is mutated"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "bloom_probe",
+   "bloom_set",
+   "make_hashes",
+   "multiples",
+   "popcount",
+   "rotate_xor",
+   "set_intersect"
+  ],
+  "icount": {
+   "cpython": 26940433740,
+   "hand": 25326330735
+  },
+  "module": "bitset_bloom",
+  "observe_same_output": true,
+  "profile": {
+   "bloom_probe": {
+    "big": {},
+    "calls": 6,
+    "generator": false,
+    "params": {
+     "bits": {
+      "int": 6
+     },
+     "keys": {
+      "list[int]": 6
+     },
+     "table": {
+      "list[int]": 6
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 6
+    },
+    "self_s": 1.261068
+   },
+   "bloom_set": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "bits": {
+      "int": 2
+     },
+     "keys": {
+      "list[int]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 2
+    },
+    "self_s": 0.319309
+   },
+   "make_hashes": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "mod": {
+      "int": 2
+     },
+     "n": {
+      "int": 2
+     },
+     "seed": {
+      "int": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 2
+    },
+    "self_s": 0.476942
+   },
+   "multiples": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "d": {
+      "int": 1
+     },
+     "keys": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.024251
+   },
+   "popcount": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "table": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.004042
+   },
+   "rotate_xor": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "keys": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.105089
+   },
+   "set_intersect": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.016168
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "count_fields",
+   "field_chars",
+   "max_field_len",
+   "quote_count",
+   "split_lines",
+   "sum_column"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "quote_count"
+    ],
+    "build_rc": 0,
+    "build_s": 3.63,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "quote_count"
+    ],
+    "rejected": {
+     "count_fields": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython",
+     "field_chars": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython",
+     "max_field_len": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython",
+     "split_lines": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "sum_column": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_fields",
+   "field_chars",
+   "max_field_len",
+   "quote_count",
+   "split_lines",
+   "sum_column"
+  ],
+  "icount": {
+   "cpython": 29902001424,
+   "hand": 27905347422
+  },
+  "module": "csv_parse",
+  "observe_same_output": true,
+  "profile": {
+   "count_fields": {
+    "big": {},
+    "calls": 350000,
+    "generator": false,
+    "params": {
+     "line": {
+      "str": 6476
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1040
+    },
+    "self_s": 0.482968
+   },
+   "field_chars": {
+    "big": {},
+    "calls": 350000,
+    "generator": false,
+    "params": {
+     "line": {
+      "str": 6476
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1040
+    },
+    "self_s": 0.515166
+   },
+   "max_field_len": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.289781
+   },
+   "quote_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.124767
+   },
+   "split_lines": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[str]": 1
+    },
+    "self_s": 0.394424
+   },
+   "sum_column": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "col": {
+      "int": 1
+     },
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.652007
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "Frame.__init__",
+   "Frame.rows",
+   "filter_sum",
+   "group_count",
+   "group_sum",
+   "max_group_count",
+   "scaled_total",
+   "total_of",
+   "weighted_sum"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "filter_sum",
+     "max_group_count",
+     "total_of"
+    ],
+    "build_rc": 0,
+    "build_s": 3.43,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "filter_sum",
+     "max_group_count",
+     "total_of"
+    ],
+    "rejected": {
+     "group_count": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "group_sum": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "scaled_total": "division or power can raise",
+     "weighted_sum": "the list parameter is mutated"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "filter_sum",
+   "group_count",
+   "group_sum",
+   "max_group_count",
+   "scaled_total",
+   "total_of",
+   "weighted_sum"
+  ],
+  "icount": {
+   "cpython": 14254899605,
+   "hand": 13188676754
+  },
+  "module": "dataframe_group",
+  "observe_same_output": true,
+  "profile": {
+   "Frame": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Frame.__init__": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     },
+     "key": {
+      "list[int]": 1
+     },
+     "self": {
+      "cls:dataframe_group.Frame": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Frame.rows": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:dataframe_group.Frame": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "filter_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "hi": {
+      "int": 1
+     },
+     "lo": {
+      "int": 1
+     },
+     "vals": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.108195
+   },
+   "group_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "key": {
+      "list[int]": 1
+     },
+     "ngroups": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.091549
+   },
+   "group_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "key": {
+      "list[int]": 1
+     },
+     "ngroups": {
+      "int": 1
+     },
+     "vals": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.191421
+   },
+   "max_group_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "scaled_total": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "den": {
+      "int": 1
+     },
+     "num": {
+      "int": 1
+     },
+     "vals": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.120679
+   },
+   "total_of": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "weighted_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     },
+     "w": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.266325
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "best_match",
+   "bigram_overlap",
+   "common_prefix",
+   "hamming",
+   "levenshtein",
+   "total_length"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "bigram_overlap",
+     "common_prefix",
+     "hamming"
+    ],
+    "build_rc": 0,
+    "build_s": 6.06,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "bigram_overlap",
+     "common_prefix",
+     "hamming"
+    ],
+    "rejected": {
+     "best_match": "unresolved-param: cands stays in CPython",
+     "levenshtein": "a call can raise or have side effects",
+     "total_length": "unresolved-param: words stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "best_match",
+   "bigram_overlap",
+   "common_prefix",
+   "hamming",
+   "levenshtein",
+   "total_length"
+  ],
+  "icount": {
+   "cpython": 32791646897,
+   "hand": 31619274177
+  },
+  "module": "edit_dist",
+  "observe_same_output": true,
+  "profile": {
+   "best_match": {
+    "big": {},
+    "calls": 4000,
+    "generator": false,
+    "params": {
+     "cands": {
+      "list[str]": 1070
+     },
+     "word": {
+      "str": 1070
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1056
+    },
+    "self_s": 0.028084
+   },
+   "bigram_overlap": {
+    "big": {},
+    "calls": 4000,
+    "generator": false,
+    "params": {
+     "a": {
+      "str": 1070
+     },
+     "b": {
+      "str": 1070
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1056
+    },
+    "self_s": 0.104311
+   },
+   "common_prefix": {
+    "big": {},
+    "calls": 4000,
+    "generator": false,
+    "params": {
+     "a": {
+      "str": 1070
+     },
+     "b": {
+      "str": 1070
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1056
+    },
+    "self_s": 0.016048
+   },
+   "hamming": {
+    "big": {},
+    "calls": 4000,
+    "generator": false,
+    "params": {
+     "a": {
+      "str": 1070
+     },
+     "b": {
+      "str": 1070
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1056
+    },
+    "self_s": 0.008024
+   },
+   "levenshtein": {
+    "big": {},
+    "calls": 24000,
+    "generator": false,
+    "params": {
+     "a": {
+      "str": 1383
+     },
+     "b": {
+      "str": 1383
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1056
+    },
+    "self_s": 2.45933
+   },
+   "total_length": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "words": {
+      "list[str]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "field_weight",
+   "is_simple_email",
+   "is_upper_name",
+   "looks_like_version",
+   "normalise_name",
+   "score_ok",
+   "valid_len"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "field_weight",
+     "is_upper_name",
+     "looks_like_version",
+     "normalise_name"
+    ],
+    "build_rc": 0,
+    "build_s": 3.96,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "field_weight",
+     "is_upper_name",
+     "looks_like_version",
+     "normalise_name"
+    ],
+    "rejected": {
+     "is_simple_email": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "score_ok": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "valid_len": "unresolved-return: no return, or contradictory returns stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "field_weight",
+   "is_simple_email",
+   "is_upper_name",
+   "looks_like_version",
+   "normalise_name",
+   "score_ok",
+   "valid_len"
+  ],
+  "icount": {
+   "cpython": 29817367044,
+   "hand": 28771220925
+  },
+  "module": "field_valid",
+  "observe_same_output": true,
+  "profile": {
+   "field_weight": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "email": {
+      "str": 11945
+     },
+     "name": {
+      "str": 11945
+     },
+     "score": {
+      "int": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.828321
+   },
+   "is_simple_email": {
+    "big": {},
+    "calls": 1400000,
+    "generator": false,
+    "params": {
+     "addr": {
+      "str": 22883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1104
+    },
+    "self_s": 1.568607
+   },
+   "is_upper_name": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "name": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1104
+    },
+    "self_s": 0.332129
+   },
+   "looks_like_version": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "tag": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1104
+    },
+    "self_s": 0.432167
+   },
+   "normalise_name": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "raw": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "str": 1104
+    },
+    "self_s": 1.052407
+   },
+   "score_ok": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "score": {
+      "int": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1104
+    },
+    "self_s": 0.308119
+   },
+   "valid_len": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "name": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1104
+    },
+    "self_s": 0.692268
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "blend",
+   "dot",
+   "max_abs",
+   "mean",
+   "norm",
+   "scale_into",
+   "sq_sum",
+   "variance"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 6.41,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "blend": "the typed clone is not wired to the hybrid ABI, stays in CPython",
+     "dot": "the typed clone is not wired to the hybrid ABI, stays in CPython",
+     "max_abs": "the typed clone is not wired to the hybrid ABI, stays in CPython",
+     "mean": "the typed clone is not wired to the hybrid ABI, stays in CPython",
+     "norm": "the typed clone is not wired to the hybrid ABI, stays in CPython",
+     "scale_into": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "sq_sum": "the typed clone is not wired to the hybrid ABI, stays in CPython",
+     "variance": "the typed clone is not wired to the hybrid ABI, stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "blend",
+   "dot",
+   "max_abs",
+   "mean",
+   "norm",
+   "scale_into",
+   "sq_sum",
+   "variance"
+  ],
+  "icount": {
+   "cpython": 27824033727,
+   "hand": 27874906333
+  },
+  "module": "float_loops",
+  "observe_same_output": true,
+  "profile": {
+   "blend": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[float]": 1
+     },
+     "b": {
+      "list[float]": 1
+     },
+     "w": {
+      "float": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.468685
+   },
+   "dot": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[float]": 1
+     },
+     "b": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.361189
+   },
+   "max_abs": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.128996
+   },
+   "mean": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 2
+    },
+    "self_s": 0.219293
+   },
+   "norm": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.133296
+   },
+   "scale_into": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "k": {
+      "float": 1
+     },
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[float]": 1
+    },
+    "self_s": 0.62348
+   },
+   "sq_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.128996
+   },
+   "variance": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.240792
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "bfs_reach",
+   "build_graph",
+   "degree_sum",
+   "dfs_count",
+   "edges_above",
+   "max_degree"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 2.19,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "bfs_reach": "unresolved-param: adj stays in CPython",
+     "build_graph": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "degree_sum": "unresolved-param: adj stays in CPython",
+     "dfs_count": "unresolved-param: adj stays in CPython",
+     "edges_above": "unresolved-param: adj stays in CPython",
+     "max_degree": "unresolved-param: adj stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "bfs_reach",
+   "build_graph",
+   "degree_sum",
+   "dfs_count",
+   "edges_above",
+   "max_degree"
+  ],
+  "icount": {
+   "cpython": 18771206049,
+   "hand": 18802804997
+  },
+  "module": "graph_search",
+  "observe_same_output": true,
+  "profile": {
+   "bfs_reach": {
+    "big": {},
+    "calls": 22,
+    "generator": false,
+    "params": {
+     "adj": {
+      "list[list[int]]": 22
+     },
+     "start": {
+      "int": 22
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 22
+    },
+    "self_s": 1.255632
+   },
+   "build_graph": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "fanout": {
+      "int": 1
+     },
+     "n": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[list[int]]": 1
+    },
+    "self_s": 0.104302
+   },
+   "degree_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "adj": {
+      "list[list[int]]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.004012
+   },
+   "dfs_count": {
+    "big": {},
+    "calls": 22,
+    "generator": false,
+    "params": {
+     "adj": {
+      "list[list[int]]": 22
+     },
+     "start": {
+      "int": 22
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 22
+    },
+    "self_s": 1.291737
+   },
+   "edges_above": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "adj": {
+      "list[list[int]]": 1
+     },
+     "lo": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.012035
+   },
+   "max_degree": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "adj": {
+      "list[list[int]]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "adler32_simple",
+   "crc32_table_free",
+   "djb2",
+   "fnv1a",
+   "fnv1a_64",
+   "sum_bytes",
+   "xor_fold"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 5.47,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "adler32_simple": "unresolved-param: data stays in CPython",
+     "crc32_table_free": "unresolved-param: data stays in CPython",
+     "djb2": "a call can raise or have side effects",
+     "fnv1a": "unresolved-param: data stays in CPython",
+     "fnv1a_64": "unresolved-param: data stays in CPython",
+     "sum_bytes": "unresolved-param: data stays in CPython",
+     "xor_fold": "unresolved-param: data stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "adler32_simple",
+   "crc32_table_free",
+   "djb2",
+   "fnv1a",
+   "fnv1a_64",
+   "sum_bytes",
+   "xor_fold"
+  ],
+  "icount": {
+   "cpython": 28261772630,
+   "hand": 28036195017
+  },
+  "module": "hashing",
+  "observe_same_output": true,
+  "profile": {
+   "adler32_simple": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.393283
+   },
+   "crc32_table_free": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.016052
+   },
+   "djb2": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.256838
+   },
+   "fnv1a": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.453479
+   },
+   "fnv1a_64": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.513676
+   },
+   "sum_bytes": {
+    "big": {},
+    "calls": 48,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 48
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 40
+    },
+    "self_s": 0.224733
+   },
+   "xor_fold": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.108353
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "Parser.__init__",
+   "Parser.parse_array",
+   "Parser.parse_number",
+   "Parser.parse_object",
+   "Parser.parse_string",
+   "Parser.parse_value",
+   "Parser.skip_ws",
+   "count_tokens",
+   "depth_of",
+   "digits_in",
+   "document_bytes"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "count_tokens",
+     "depth_of",
+     "document_bytes"
+    ],
+    "build_rc": 0,
+    "build_s": 5.44,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_tokens",
+     "depth_of",
+     "document_bytes"
+    ],
+    "rejected": {
+     "digits_in": "a call can raise or have side effects"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_tokens",
+   "depth_of",
+   "digits_in",
+   "document_bytes"
+  ],
+  "icount": {
+   "cpython": 21203727313,
+   "hand": 18720095656
+  },
+  "module": "json_parse",
+  "observe_same_output": true,
+  "profile": {
+   "Parser": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Parser.__init__": {
+    "big": {},
+    "calls": 3,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 3
+     },
+     "text": {
+      "str": 3
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 3
+    },
+    "self_s": 0.0
+   },
+   "Parser.parse_array": {
+    "big": {},
+    "calls": 120003,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 2883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.124283
+   },
+   "Parser.parse_number": {
+    "big": {},
+    "calls": 240000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 4758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.49713
+   },
+   "Parser.parse_object": {
+    "big": {},
+    "calls": 120000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 2883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.204465
+   },
+   "Parser.parse_string": {
+    "big": {},
+    "calls": 1080000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 17883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 1.210753
+   },
+   "Parser.parse_value": {
+    "big": {},
+    "calls": 1080003,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 17883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.813851
+   },
+   "Parser.skip_ws": {
+    "big": {},
+    "calls": 4080006,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 64758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1104
+    },
+    "self_s": 2.152896
+   },
+   "count_tokens": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.072164
+   },
+   "depth_of": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.164374
+   },
+   "digits_in": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.076173
+   },
+   "document_bytes": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "apply_threshold",
+   "count_negative",
+   "identity",
+   "mat_mul",
+   "max_element",
+   "row_sums",
+   "scale_vec",
+   "trace"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "apply_threshold",
+     "count_negative",
+     "max_element",
+     "scale_vec",
+     "trace"
+    ],
+    "build_rc": 0,
+    "build_s": 4.14,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "apply_threshold",
+     "count_negative",
+     "max_element",
+     "scale_vec",
+     "trace"
+    ],
+    "rejected": {
+     "identity": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "mat_mul": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "row_sums": "unresolved-return: no return, or contradictory returns stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "apply_threshold",
+   "count_negative",
+   "identity",
+   "mat_mul",
+   "max_element",
+   "row_sums",
+   "scale_vec",
+   "trace"
+  ],
+  "icount": {
+   "cpython": 44464118576,
+   "hand": 44133974867
+  },
+  "module": "matrix",
+  "observe_same_output": true,
+  "profile": {
+   "apply_threshold": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "m": {
+      "list[int]": 1
+     },
+     "t": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.004004
+   },
+   "count_negative": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "m": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "identity": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "n": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.0
+   },
+   "mat_mul": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     },
+     "n": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 3.431501
+   },
+   "max_element": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "m": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "row_sums": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "m": {
+      "list[int]": 1
+     },
+     "n": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.008008
+   },
+   "scale_vec": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "k": {
+      "int": 1
+     },
+     "v": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.004004
+   },
+   "trace": {
+    "big": {},
+    "calls": 3,
+    "generator": false,
+    "params": {
+     "m": {
+      "list[int]": 3
+     },
+     "n": {
+      "int": 3
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 3
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "count_over",
+   "longest_run",
+   "make_samples",
+   "mean_scaled",
+   "rising_streak",
+   "second_moment",
+   "total",
+   "window_sums"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "count_over",
+     "longest_run",
+     "second_moment",
+     "total"
+    ],
+    "build_rc": 0,
+    "build_s": 4.16,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_over",
+     "longest_run",
+     "second_moment",
+     "total"
+    ],
+    "rejected": {
+     "make_samples": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "mean_scaled": "division or power can raise",
+     "rising_streak": "the list parameter is mutated",
+     "window_sums": "unresolved-return: no return, or contradictory returns stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_over",
+   "longest_run",
+   "make_samples",
+   "mean_scaled",
+   "rising_streak",
+   "second_moment",
+   "total",
+   "window_sums"
+  ],
+  "icount": {
+   "cpython": 35762505891,
+   "hand": 31432807069
+  },
+  "module": "rolling_stats",
+  "observe_same_output": true,
+  "profile": {
+   "count_over": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "limit": {
+      "int": 2
+     },
+     "xs": {
+      "list[int]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 2
+    },
+    "self_s": 0.128927
+   },
+   "longest_run": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "want": {
+      "int": 2
+     },
+     "xs": {
+      "list[int]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 2
+    },
+    "self_s": 0.11645
+   },
+   "make_samples": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "n": {
+      "int": 1
+     },
+     "seed": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.627998
+   },
+   "mean_scaled": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "scale": {
+      "int": 1
+     },
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.124768
+   },
+   "rising_streak": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 2
+    },
+    "self_s": 0.50323
+   },
+   "second_moment": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.158039
+   },
+   "total": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.07902
+   },
+   "window_sums": {
+    "big": {},
+    "calls": 3,
+    "generator": false,
+    "params": {
+     "w": {
+      "int": 3
+     },
+     "xs": {
+      "list[int]": 3
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 3
+    },
+    "self_s": 1.738432
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "count_above",
+   "count_terms",
+   "hash_spread",
+   "max_count",
+   "top_indices",
+   "top_score",
+   "total_count"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "count_above",
+     "max_count",
+     "total_count"
+    ],
+    "build_rc": 0,
+    "build_s": 4.0,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_above",
+     "max_count",
+     "total_count"
+    ],
+    "rejected": {
+     "count_terms": "unresolved-param: words stays in CPython",
+     "hash_spread": "unresolved-param: words stays in CPython",
+     "top_indices": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "top_score": "to_c-refused: returning Subscript as a list stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_above",
+   "count_terms",
+   "hash_spread",
+   "max_count",
+   "top_indices",
+   "top_score",
+   "total_count"
+  ],
+  "icount": {
+   "cpython": 23440935018,
+   "hand": 23604887136
+  },
+  "module": "sort_rank",
+  "observe_same_output": true,
+  "profile": {
+   "count_above": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     },
+     "threshold": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "count_terms": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "vocab_size": {
+      "int": 1
+     },
+     "words": {
+      "list[str]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.82005
+   },
+   "hash_spread": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "buckets": {
+      "int": 1
+     },
+     "vocab_size": {
+      "int": 1
+     },
+     "words": {
+      "list[str]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.722618
+   },
+   "max_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "top_indices": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 2
+     },
+     "k": {
+      "int": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 2
+    },
+    "self_s": 0.0
+   },
+   "top_score": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     },
+     "k": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "total_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "count_idents",
+   "count_keywords",
+   "digit_count",
+   "is_ident_char",
+   "is_ident_start",
+   "longest_ident",
+   "token_weight"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "count_keywords"
+    ],
+    "build_rc": 0,
+    "build_s": 3.66,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_keywords"
+    ],
+    "rejected": {
+     "count_idents": "a call can raise or have side effects",
+     "digit_count": "a call can raise or have side effects",
+     "is_ident_char": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "is_ident_start": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "longest_ident": "a call can raise or have side effects",
+     "token_weight": "a call can raise or have side effects"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_idents",
+   "count_keywords",
+   "digit_count",
+   "is_ident_char",
+   "is_ident_start",
+   "longest_ident",
+   "token_weight"
+  ],
+  "icount": {
+   "cpython": 14080976438,
+   "hand": 10799882298
+  },
+  "module": "tokenizer",
+  "observe_same_output": true,
+  "profile": {
+   "count_idents": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.09212
+   },
+   "count_keywords": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "kw": {
+      "str": 1
+     },
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.228298
+   },
+   "digit_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.052068
+   },
+   "is_ident_char": {
+    "big": {},
+    "calls": 3760000,
+    "generator": false,
+    "params": {
+     "ch": {
+      "str": 59758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1056
+    },
+    "self_s": 1.157508
+   },
+   "is_ident_start": {
+    "big": {},
+    "calls": 2840000,
+    "generator": false,
+    "params": {
+     "ch": {
+      "str": 45383
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1056
+    },
+    "self_s": 0.833086
+   },
+   "longest_ident": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.076099
+   },
+   "token_weight": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.112146
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "Node.__init__",
+   "Tree.__init__",
+   "Tree._depth",
+   "Tree._height",
+   "Tree._inorder",
+   "Tree.depth_sum",
+   "Tree.height",
+   "Tree.inorder_sum",
+   "Tree.insert",
+   "Tree.max_key",
+   "Tree.min_key",
+   "build_tree",
+   "count_nodes"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 2.38,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "build_tree": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "count_nodes": "unresolved-param: t stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "build_tree",
+   "count_nodes"
+  ],
+  "icount": {
+   "cpython": 22914629341,
+   "hand": 22969331793
+  },
+  "module": "tree_build",
+  "observe_same_output": true,
+  "profile": {
+   "Node": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Tree": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Tree.__init__": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Tree._depth": {
+    "big": {},
+    "calls": 9720081,
+    "generator": false,
+    "params": {
+     "d": {
+      "int": 152884
+     },
+     "idx": {
+      "int": 152884
+     },
+     "self": {
+      "cls:tree_build.Tree": 152884
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1264
+    },
+    "self_s": 4.841917
+   },
+   "Tree._height": {
+    "big": {},
+    "calls": 9720081,
+    "generator": false,
+    "params": {
+     "idx": {
+      "int": 152884
+     },
+     "self": {
+      "cls:tree_build.Tree": 152884
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1264
+    },
+    "self_s": 5.066191
+   },
+   "Tree._inorder": {
+    "big": {},
+    "calls": 9720081,
+    "generator": false,
+    "params": {
+     "idx": {
+      "int": 152884
+     },
+     "self": {
+      "cls:tree_build.Tree": 152884
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1264
+    },
+    "self_s": 5.322504
+   },
+   "Tree.depth_sum": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "Tree.height": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "Tree.inorder_sum": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "Tree.insert": {
+    "big": {},
+    "calls": 60000,
+    "generator": false,
+    "params": {
+     "key": {
+      "int": 1945
+     },
+     "self": {
+      "cls:tree_build.Tree": 1945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1024
+    },
+    "self_s": 0.124152
+   },
+   "Tree.max_key": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "Tree.min_key": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "build_tree": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "keys": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "cls:tree_build.Tree": 1
+    },
+    "self_s": 0.00801
+   },
+   "count_nodes": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "t": {
+      "cls:tree_build.Tree": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ }
+]

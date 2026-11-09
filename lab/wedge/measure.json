@@ -50,7 +50,21 @@
   "hybrid_s": 1.8420698410000114,
   "hybrid_rc": 0,
   "standalone_s": 0.7055398289999175,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.3127675719988474,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.312193,
+   0.312768,
+   0.313443,
+   0.311299,
+   0.319882
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "8549cd47d99f1c24698ab4593acf00b9feb9ba7acae6e6f0e7518241cc5479c0",
+  "pypy_oracle": true
  },
  {
   "module": "bitset_bloom",
@@ -110,7 +124,21 @@
   "hybrid_s": 1.8063854170000013,
   "hybrid_rc": 0,
   "standalone_s": null,
-  "standalone_rc": 1
+  "standalone_rc": 1,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.20936453600006644,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.207882,
+   0.209365,
+   0.209738,
+   0.213504,
+   0.208875
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "d1ddb4326c59f420096cabd29fbc025fdb9881c3b5a8896e1fa48c68936e6f6b",
+  "pypy_oracle": true
  },
  {
   "module": "csv_parse",
@@ -160,7 +188,21 @@
   "hybrid_s": 1.8835684340001535,
   "hybrid_rc": 0,
   "standalone_s": 0.14020399899982294,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.3617911090004782,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.361791,
+   0.368377,
+   0.362787,
+   0.360773,
+   0.361055
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "df08a02199cd0b7c7840b32faa7da43d3336823508dbc040e1c3f9f2f8236726",
+  "pypy_oracle": true
  },
  {
   "module": "dataframe_group",
@@ -235,7 +277,21 @@
   "hybrid_s": 0.8985112489999665,
   "hybrid_rc": 0,
   "standalone_s": 0.023008300000128656,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.36307906699948944,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.363027,
+   0.359598,
+   0.363079,
+   0.365728,
+   0.371166
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "27f9de117f3197ccdbdebc49309d8b23f635f6324a00a4412fb8a0cd98bdcc02",
+  "pypy_oracle": true
  },
  {
   "module": "edit_dist",
@@ -288,7 +344,21 @@
   "hybrid_s": 2.2320012649997807,
   "hybrid_rc": 0,
   "standalone_s": 1.945266007999635,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.2501746930010995,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.249177,
+   0.251754,
+   0.250175,
+   0.249809,
+   0.250753
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "b4af68c611dba29697989646e05c63645033d62afa80c482b737688826f7627e",
+  "pypy_oracle": true
  },
  {
   "module": "field_valid",
@@ -346,7 +416,21 @@
   "hybrid_s": 2.1834537980003006,
   "hybrid_rc": 0,
   "standalone_s": 0.11000788000001194,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.41574023599969223,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.40744,
+   0.409543,
+   0.417271,
+   0.41574,
+   0.437162
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "73781195a3a8c241ba2b74f86e0025252363c62bcec68b29a961c22d7549f2fd",
+  "pypy_oracle": true
  },
  {
   "module": "float_loops",
@@ -404,7 +488,21 @@
   "hybrid_s": 2.205730100999972,
   "hybrid_rc": 0,
   "standalone_s": 0.1525172910000947,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.5844643609998457,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.583891,
+   0.587838,
+   0.584464,
+   0.590079,
+   0.582343
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "877d3b66d8d1c35c594a9ad102f3fde3090be219af9aa268e342cface564b57a",
+  "pypy_oracle": true
  },
  {
   "module": "graph_search",
@@ -452,7 +550,21 @@
   "hybrid_s": 2.0226505529999486,
   "hybrid_rc": 0,
   "standalone_s": 1.962978404000296,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.5367150040001434,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.488418,
+   0.585478,
+   0.536715,
+   0.551949,
+   0.455649
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "175ff805b26c19474845a8ae7a5e76b933e0fd971f2ff0144e954a60bb01d4b9",
+  "pypy_oracle": true
  },
  {
   "module": "hashing",
@@ -507,7 +619,21 @@
   "hybrid_s": 1.6663708259998202,
   "hybrid_rc": 0,
   "standalone_s": null,
-  "standalone_rc": 1
+  "standalone_rc": 1,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.17431873099849327,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.176419,
+   0.176332,
+   0.173844,
+   0.174319,
+   0.173508
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "760ece7db3cf3ad407f31f1aea8a0e9c3125a9384708bb926c47a19924856c3b",
+  "pypy_oracle": true
  },
  {
   "module": "json_parse",
@@ -591,7 +717,21 @@
   "hybrid_s": 1.2745991829997365,
   "hybrid_rc": 0,
   "standalone_s": 1.4232889640002213,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.24737045999972906,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.24737,
+   0.24728,
+   0.24843,
+   0.246811,
+   0.25458
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "59e9f38900a8cceb49982eb72da3274b65e95aeeb6c1f89969432e537b6819ab",
+  "pypy_oracle": true
  },
  {
   "module": "matrix",
@@ -656,7 +796,21 @@
   "hybrid_s": 2.905433420999998,
   "hybrid_rc": 0,
   "standalone_s": 0.023357353999927,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.08138106899968989,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.082066,
+   0.080814,
+   0.082523,
+   0.081321,
+   0.081381
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "cfee8cb0c733592e185948100ded0927261be636dfb0dc4e2c70133039d6899e",
+  "pypy_oracle": true
  },
  {
   "module": "rolling_stats",
@@ -722,7 +876,21 @@
   "hybrid_s": 2.4239380149997487,
   "hybrid_rc": 0,
   "standalone_s": 0.12018489699994461,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.3682750770003622,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.414358,
+   0.37591,
+   0.368275,
+   0.365958,
+   0.363572
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "30970e2334a922a1a042561576c4bc600a556a0135032cc354f7ed11f15a978e",
+  "pypy_oracle": true
  },
  {
   "module": "sort_rank",
@@ -779,7 +947,21 @@
   "hybrid_s": 1.5306433149999066,
   "hybrid_rc": 0,
   "standalone_s": 1.6090502189999825,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.334358930000235,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.336446,
+   0.34875,
+   0.332359,
+   0.333655,
+   0.334359
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "fca8453f362673c0b12d3cb9d4e1cf8b5ac154c1fe056dc46525a16cd084cc66",
+  "pypy_oracle": true
  },
  {
   "module": "tokenizer",
@@ -838,7 +1020,21 @@
   "hybrid_s": 0.8827719010000692,
   "hybrid_rc": 0,
   "standalone_s": 0.09320988000035868,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.10183402799884789,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.102461,
+   0.101592,
+   0.10197,
+   0.101834,
+   0.101575
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "05fa17339a0b83f08a23bdb6a0166079f2cdb91d70648e4cbda1784dac360e98",
+  "pypy_oracle": true
  },
  {
   "module": "tree_build",
@@ -926,6 +1122,20 @@
   "hybrid_s": 1.9872414390001722,
   "hybrid_rc": 0,
   "standalone_s": 0.1771014959999775,
-  "standalone_rc": 0
+  "standalone_rc": 0,
+  "pypy_cmd": "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+  "pypy_version": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "pypy_s": 0.5222591490000923,
+  "pypy_rc": 0,
+  "pypy_runs_s": [
+   0.520967,
+   0.52263,
+   0.522259,
+   0.520474,
+   0.522724
+  ],
+  "pypy_match": true,
+  "pypy_expected_sha256": "37a8648f4d0efc96296485856a09b1907a6d78d820d41888b018f1f60ab6ba27",
+  "pypy_oracle": true
  }
 ]
