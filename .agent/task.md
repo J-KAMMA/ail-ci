@@ -1,3 +1,43 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review of job-wedge3c (`git diff work..HEAD`)
+
+**What the change really does:** adds a measurement-only lab report (`lab/wedge3/wedge3c/`: `bench.py`, two workloads, two probes, `results.json`, `RESULTS.md`, pinned requirements) plus a DEVLOG entry. No compiler, runtime or test file is touched — confirmed by `git diff --stat` (only `DEVLOG.md` and `lab/wedge3/wedge3c/**`).
+
+**Independent checks I ran (05:19–05:33 UTC):**
+- Re-ran `bench.py` against the recorded obs5 commit (`69e2dcd0…` exists locally: "obs5: full corpus measurement"): plain build accelerated `[]`, observed build accelerated `['_normalize']` for jellyfish, `[]` for msgpack; all five columns' `output_sha` identical and equal to the committed `results.json`. Core result reproduced.
+- Ran both probes with `bash ~/tools/cmp.sh`: both builds refuse `import of 'jellyfish'/'msgpack' is not available` — matches the report.
+- Ran the probes with prepared pure 0.8.9, PyPy 3.10.14 and native 1.1.0: jellyfish output identical; msgpack pure vs C extension identical. `perf_event_paranoid = 4`, `valgrind` absent — matches.
+- `test_ail_safetynet` on HEAD, `-j 2`: pass (289 s, 0 failed). `update_manifest.py --check`: exit 0.
+
+**Verified claims:** 0 selected plain (jellyfish 6 submitted / 14 total, msgpack 35); `_normalize` selected only in the observed build; timings are median-of-5 under `ulimit -v`; ratio figures 0.981/5.368/10.523 and 0.994/3.282/14.056 match `results.json`; refusal figures 1.793/1.022/0.595 and 3.477/2.348/0.294/0.101 match; probe refusal-by-name; icount unavailable; obs5 commit id.
+
+**False claim (same root cause in two files):**
+- `DEVLOG.md:22-24` — "Observed kinds … selected nothing either: they renamed jellyfish's gate … to `unresolved-return` (all six, `return branches require distinct tags`)".
+- `RESULTS.md:37-39` — "jellyfish went from `unresolved-param` (all six units) to `unresolved-return` (all six)".
+
+Expected (committed `results.json` `observed_refusals`, and `RESULTS.md` §3's own table): `_normalize` is **selected** (`selected_helpers_observed = ["_normalize"]`), four units are refused as `unresolved-return: return branches require distinct tags`, and `_check_type` is refused as `unresolved-return: no return, or contradictory returns` — i.e. 4+1+1, not six under one gate and not "selected nothing". Repro: `python3 -c "import json;r=json.load(open('lab/wedge3/wedge3c/results.json'))[0];print(r['selected_helpers_observed'], r['observed_refusals'])"`.
+
+**Pre-existing:** none relevant. The diff contains no compiler/runtime file, so C for programs not using the (non-existent) feature is trivially unchanged; no base worktree comparison needed. No hot-code impact, so no icount run.
+
+**Unverified:** the worker's claim that `test_ail_files` and `test_ail_corpus_findings3` also pass on HEAD (not rerun per the reviewer instruction), and the absolute wall-clock magnitudes (my rerun on the shared runner was ~2.5x slower, but selection, sha equality and ratios directionally reproduced).
+
+**Defects:**
+1. `DEVLOG.md:22-24` and `RESULTS.md:37-39` misstate the observed-types outcome. Expected: observed build selects `_normalize`; refusals split 4 × `return branches require distinct tags` + 1 × `no return, or contradictory returns` + 1 selected. Actual: "selected nothing either" and "(all six)" under `return branches require distinct tags`. Fix both sentences to match `results.json` / the §3 table.
+
+VERDICT: FIX
+1. DEVLOG.md:22-24 and RESULTS.md:37-39 wrongly say observed kinds "selected nothing" and moved all six jellyfish units to `unresolved-return: return branches require distinct tags`; results.json shows `_normalize` selected, 4 units under distinct-tags and `_check_type` under "no return, or contradictory returns".
+[commandcode stop=end_turn turns=31 out_tokens=21279]
+
+
+--- ORIGINAL TASK ---
 # wedge3c: more real libraries rewritten in Rust (breadth for wedge3)
 
 Lane: wedge3c
