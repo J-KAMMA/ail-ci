@@ -1,4 +1,4 @@
-## 2026-11-08 -- rbsetord2_rr1 full suite: `test_ail_bigint` size gate after the set-order emulation (job-rbsetord2_rr1-11090751)
+## 2026-11-09 -- rbsetord2_rr1 full suite: `test_ail_bigint` size gate after the set-order emulation (job-rbsetord2_rr1-11090751)
 
 `test_ail_bigint.DefaultBuild.test_constant_math_and_float_programs_are_exact` failed with my change in
 the tree: `gate_math_constants` built 152,288 B against its `exe.stat().st_size < 150000` assertion. That
