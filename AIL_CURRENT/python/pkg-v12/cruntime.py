@@ -16609,25 +16609,29 @@ static inline ail_obj ail_frozenset_new(ail_ctx *cx) { return ail_setx_new(cx, 1
 #define AIL_CS_LINEAR 9
 #define AIL_CS_PERTURB 5
 
+static inline __attribute__((noinline, cold)) int ail_setx_det_deep(ail_obj key);
 static inline int ail_setx_det(ail_obj key) {
     switch (key.tag) {
         case AIL_T_INT: case AIL_T_BOOL: case AIL_T_NONE: return 1;
         case AIL_T_FLOAT: { double v = ail_float_val(key); return v == v; }   /* a NaN hashes by identity */
-        case AIL_T_TUPLE: {
-            ail_vecobj *v = (ail_vecobj *)key.o;
-            for (int64_t i = 0; i < v->n; i++) if (!ail_setx_det(v->p[i])) return 0;
-            return 1;
-        }
-        case AIL_T_FROZENSET: {
-            /* frozenset_hash only depends on the elements' stored hashes, so a frozenset of
-               deterministic keys has a deterministic hash too (nested frozensets included). */
-            ail_setobj *s = AIL_SETOBJ(key);
-            for (int64_t i = 0; i < s->n; i++)
-                if (ail_setx_live(&s->ent[i]) && !ail_setx_det(s->ent[i].key)) return 0;
-            return 1;
-        }
+        case AIL_T_TUPLE: case AIL_T_FROZENSET: return ail_setx_det_deep(key);
         default: return 0;
     }
+}
+/* the container cases, out of line: `ail_setx_det` is on the set-add path of every program that
+   builds a set, and the recursion belongs in one copy, not inlined at every call site. */
+static __attribute__((noinline, cold)) int ail_setx_det_deep(ail_obj key) {
+    if (key.tag == AIL_T_TUPLE) {
+        ail_vecobj *v = (ail_vecobj *)key.o;
+        for (int64_t i = 0; i < v->n; i++) if (!ail_setx_det(v->p[i])) return 0;
+        return 1;
+    }
+    /* frozenset_hash only depends on the elements' stored hashes, so a frozenset of
+       deterministic keys has a deterministic hash too (nested frozensets included). */
+    ail_setobj *s = AIL_SETOBJ(key);
+    for (int64_t i = 0; i < s->n; i++)
+        if (ail_setx_live(&s->ent[i]) && !ail_setx_det(s->ent[i].key)) return 0;
+    return 1;
 }
 static inline int64_t ail_setx_ct_bytes(int64_t cap) { return cap * (int64_t)sizeof(int64_t); }
 static inline void ail_setx_ct_alloc(ail_setobj *so) {
@@ -16657,7 +16661,7 @@ static inline void ail_setx_ct_insert_clean(int64_t *tab, int64_t mask, int64_t 
         i = (int64_t)(((uint64_t)i * 5 + 1 + perturb) & (uint64_t)mask);
     }
 }
-static inline void ail_setx_ct_resize(ail_ctx *cx, ail_setobj *so, int64_t minused) {
+static __attribute__((noinline, cold)) void ail_setx_ct_resize(ail_ctx *cx, ail_setobj *so, int64_t minused) {
     int64_t newsize = 8;
     while (newsize <= minused) newsize <<= 1;
     int64_t oldcap = so->cmask + 1, oldmask = so->cmask;
@@ -16723,7 +16727,7 @@ static inline void ail_setx_ct_discard(ail_setobj *so, ail_obj key, int64_t hash
 }
 
 /* rebuild into `newcap` slots, dropping holes (order kept) */
-static inline void ail_setx_rebuild(ail_ctx *cx, ail_setobj *so, int64_t newcap) {
+static __attribute__((noinline, cold)) void ail_setx_rebuild(ail_ctx *cx, ail_setobj *so, int64_t newcap) {
     ail_setentry *old = so->ent; int64_t oldn = so->n, oldcap = so->cap, oldfin = so->fin;
     int hasct = so->co && so->ctab;
     int64_t *remap = (int64_t *)ail_xmalloc((size_t)(oldn ? oldn : 1) * sizeof(int64_t));
@@ -16867,7 +16871,7 @@ static inline ail_st ail_setx_discard_key(ail_ctx *cx, int *found, ail_setobj *s
 }
 static inline ail_obj ail_setx_newlike(ail_ctx *cx, ail_obj like) { return ail_setx_new(cx, like.tag == AIL_T_FROZENSET); }
 /* set_merge: add every element of `other` (a set/frozenset) in CPython's own table order. */
-static inline void ail_setx_merge(ail_ctx *cx, ail_setobj *so, const ail_setobj *other) {
+static __attribute__((noinline, cold)) void ail_setx_merge(ail_ctx *cx, ail_setobj *so, const ail_setobj *other) {
     if (other == so || other->used == 0) return;
     if (so->co && !other->co) { ail_setx_ct_release(cx, so); so->co = 0; }
     if (so->co && other->co) {
@@ -16911,7 +16915,7 @@ static inline ail_st ail_set_rebuild_from(ail_ctx *cx, ail_obj dst, ail_obj src)
 }
 /* a's elements that are (keep 1) / are not (keep 0) in b, in CPython's order */
 static inline void ail_setx_difference_update_set(ail_ctx *cx, ail_setobj *so, ail_obj otheri);
-static inline void ail_setx_filter(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo, int keep) {
+static __attribute__((noinline, cold)) void ail_setx_filter(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo, int keep) {
     ail_obj r = ail_setx_newlike(cx, ao);
     ail_setobj *a = AIL_SETOBJ(ao), *b = AIL_SETOBJ(bo);
     ail_setobj *iter = a, *test = b;
@@ -16924,7 +16928,7 @@ static inline void ail_setx_filter(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_ob
     *out = r;
 }
 static inline void ail_setx_intersection(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) { ail_setx_filter(cx, out, ao, bo, 1); }
-static inline void ail_setx_difference(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) {
+static inline __attribute__((noinline)) void ail_setx_difference(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) {
     /* set_difference: when len(a)>>2 > len(b), CPython copies a and deletes b's elements, which
        keeps a's table layout (and its finger); otherwise it filters into a fresh set. */
     ail_setobj *a = AIL_SETOBJ(ao), *b = AIL_SETOBJ(bo);
