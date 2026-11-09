@@ -34,14 +34,26 @@ def load_model():
 
 def build(directory, name, source_path, opt_in=True):
     exe = Path(directory, name)
-    env = dict(os.environ, PYTHONHASHSEED=str(0))
+    # Each build is from source with no cache, and with its own compiler bytecode directory: the
+    # cache key and the bytecode must not carry a previous build's opt-in into this one.
+    saved = {k: os.environ.get(k) for k in ("AIL_PAR_FSUM", "AIL_NO_CACHE", "PYTHONPYCACHEPREFIX")}
+    os.environ["AIL_NO_CACHE"] = "1"
+    os.environ["PYTHONPYCACHEPREFIX"] = str(Path(directory, "pyc-" + name))
     if opt_in:
-        env["AIL_PAR_FSUM"] = "fixed"
+        os.environ["AIL_PAR_FSUM"] = "fixed"
     else:
-        env.pop("AIL_PAR_FSUM", None)
-    return subprocess.run([sys.executable, str(ROOT / "ail_chatgpt.py"), "compile",
-                           str(source_path), "--syntax", "python", "-o", str(exe)],
-                          capture_output=True, text=True, timeout=300, env=env), exe
+        os.environ.pop("AIL_PAR_FSUM", None)
+    env = dict(os.environ, PYTHONHASHSEED=str(0))
+    try:
+        return subprocess.run([sys.executable, str(ROOT / "ail_chatgpt.py"), "compile",
+                               str(source_path), "--syntax", "python", "-o", str(exe)],
+                              capture_output=True, text=True, timeout=300, env=env), exe
+    finally:
+        for k, value in saved.items():
+            if value is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = value
 
 
 def run(exe, threads):
@@ -81,10 +93,21 @@ class ParFsumTests(unittest.TestCase):
             path.write_text("def main():\n    acc = 0.0\n    for i in par_range(0, 4):\n"
                             "        acc += i\n    print(acc)\nmain()\n")
             exe = Path(directory, "out")
-            env = dict(os.environ, AIL_PAR_FSUM="yes")
-            built = subprocess.run([sys.executable, str(ROOT / "ail_chatgpt.py"), "compile", str(path),
-                                    "--syntax", "python", "-o", str(exe)], capture_output=True,
-                                   text=True, timeout=300, env=env)
+            saved = {k: os.environ.get(k) for k in ("AIL_PAR_FSUM", "AIL_NO_CACHE", "PYTHONPYCACHEPREFIX")}
+            os.environ["AIL_NO_CACHE"] = "1"
+            os.environ["PYTHONPYCACHEPREFIX"] = str(Path(directory, "pyc-out"))
+            os.environ["AIL_PAR_FSUM"] = "yes"
+            env = dict(os.environ)
+            try:
+                built = subprocess.run([sys.executable, str(ROOT / "ail_chatgpt.py"), "compile", str(path),
+                                        "--syntax", "python", "-o", str(exe)], capture_output=True,
+                                       text=True, timeout=300, env=env)
+            finally:
+                for k, value in saved.items():
+                    if value is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = value
             self.assertNotEqual(built.returncode, 0)
             self.assertIn(REFUSAL, built.stdout + built.stderr)
 
