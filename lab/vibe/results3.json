@@ -1,0 +1,8665 @@
+{
+ "meta": {
+  "started": "2026-11-09T10:40:07Z",
+  "harness": "lab/vibe/run.py",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "cli": "cmd",
+  "effort": null,
+  "rounds": 5,
+  "seeds": [
+   0
+  ],
+  "languages": [
+   "python",
+   "rust",
+   "go",
+   "ail"
+  ],
+  "tasks": [
+   "berth_sim",
+   "chain_relax",
+   "csv_rollup",
+   "dsl_calc",
+   "echo_pack",
+   "expense_split",
+   "gradebook",
+   "ini_merge",
+   "jsonl_stats",
+   "ledger_bin",
+   "log_levels",
+   "matrix_stats",
+   "rail_transfer",
+   "scar_life",
+   "tally_lang",
+   "term_rank",
+   "ticket_audit",
+   "todo_file",
+   "tree_fold",
+   "version_sort",
+   "word_freq"
+  ],
+  "jobs": 2,
+  "case_timeout": 90,
+  "mode": "python = CPython 3.12; rust = rustc -O --edition=2021; ail = AIL compile --syntax python; ail-strict = AIL with lab/vibe2/STRICT_SPEC.md; ail-new = lab/vibe2/NEW_SURFACE.md translated to AIL Python by lab/vibe2/translate.py",
+  "seed_note": "seed = independent repeated attempt; the CLI exposes no sampling seed",
+  "updated": "2026-11-09T11:36:49Z",
+  "stopped_early": true,
+  "completed_attempts": 73,
+  "scheduled_attempts": 76
+ },
+ "results": [
+  {
+   "task": "berth_sim",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 23,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 5888,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "berth_sim",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 23,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3890,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "berth_sim",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 23,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3770,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 120s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 120s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "berth_sim",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 23,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3815,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "chain_relax",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 29,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 5490,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "chain_relax",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 29,
+   "hidden": [
+    {
+     "name": "two_elements",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "three_elements",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_sweep",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "two_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "seed_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "seed_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "medium",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_sweeps_small",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "odd_length",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "even_length",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "n_max_no_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "t_max_tiny",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "n_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "t_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "seed_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "not_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_arg",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "four_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.301,
+   "final_run_seconds": 0.005,
+   "reply_tokens": 13335,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3492,
+     "reply_chars": 1940,
+     "reply_tokens": 12164,
+     "build_ok": true,
+     "build_seconds": 0.142,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [
+      "bad_n"
+     ],
+     "run_seconds": 0.006,
+     "error_sent": "public case 'bad_n' failed.\nprogram exit 2, expected 1\nprogram stderr:\npanic: runtime error: index out of range [0] with length 0\n\ngoroutine 1 [running]:\nmain.main()\n\t/tmp/vibe-chain_relax-go-0-k04pttwp/main.go:92 +0x317\n"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 5749,
+     "reply_chars": 1965,
+     "reply_tokens": 1171,
+     "build_ok": true,
+     "build_seconds": 0.147,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.005
+    }
+   ],
+   "program": "lab/vibe/programs3/chain_relax/go-0.go",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "chain_relax",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 29,
+   "hidden": [
+    {
+     "name": "two_elements",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "three_elements",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_sweep",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "two_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "seed_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "seed_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "medium",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_sweeps_small",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "odd_length",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "even_length",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "n_max_no_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "t_max_tiny",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "n_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "t_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "seed_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "not_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_arg",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "four_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.055,
+   "final_run_seconds": 0.055,
+   "reply_tokens": 13398,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3372,
+     "reply_chars": 3935,
+     "reply_tokens": 13398,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.055
+    }
+   ],
+   "program": "lab/vibe/programs3/chain_relax/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "chain_relax",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 29,
+   "hidden": [
+    {
+     "name": "two_elements",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "three_elements",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_sweep",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "two_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "seed_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "seed_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "medium",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_sweeps_small",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "odd_length",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "even_length",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "n_max_no_sweeps",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "t_max_tiny",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "n_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "t_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "seed_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "not_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_arg",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "four_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.211,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 7423,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3417,
+     "reply_chars": 2908,
+     "reply_tokens": 7423,
+     "build_ok": true,
+     "build_seconds": 0.209,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/chain_relax/rust-0.rs",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "csv_rollup",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 6,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_mixed",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.053,
+   "final_run_seconds": 0.053,
+   "reply_tokens": 13418,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3568,
+     "reply_chars": 3010,
+     "reply_tokens": 13418,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.053
+    }
+   ],
+   "program": "lab/vibe/programs3/csv_rollup/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "csv_rollup",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 6,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_mixed",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.446,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 5727,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3613,
+     "reply_chars": 4065,
+     "reply_tokens": 5727,
+     "build_ok": true,
+     "build_seconds": 0.443,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/csv_rollup/rust-0.rs",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "dsl_calc",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "whitespace",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "overflow_keeps_operands",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "clear_final",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "missing_args",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 12.483,
+   "final_run_seconds": 0.004,
+   "reply_tokens": 11065,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 5172,
+     "reply_chars": 5474,
+     "reply_tokens": 11065,
+     "build_ok": true,
+     "build_seconds": 12.48,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because the constant None; this language has no null value, so nothing holds one -- build a linked structure as parallel index lists (left[] and right[] of int, -1 where Pytho"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.004
+    }
+   ],
+   "program": "lab/vibe/programs3/dsl_calc/ail-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "dsl_calc",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "whitespace",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "overflow_keeps_operands",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "clear_final",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "missing_args",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.617,
+   "final_run_seconds": 0.006,
+   "reply_tokens": 4638,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3174,
+     "reply_chars": 3260,
+     "reply_tokens": 4638,
+     "build_ok": true,
+     "build_seconds": 0.61,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.006
+    }
+   ],
+   "program": "lab/vibe/programs3/dsl_calc/go-0.go",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "dsl_calc",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "whitespace",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "overflow_keeps_operands",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "clear_final",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "missing_args",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.084,
+   "final_run_seconds": 0.084,
+   "reply_tokens": 2482,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3054,
+     "reply_chars": 3190,
+     "reply_tokens": 2482,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.084
+    }
+   ],
+   "program": "lab/vibe/programs3/dsl_calc/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "dsl_calc",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "whitespace",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "overflow_keeps_operands",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "plus_sign",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "clear_final",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "missing_args",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.309,
+   "final_run_seconds": 0.004,
+   "reply_tokens": 4444,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3099,
+     "reply_chars": 5943,
+     "reply_tokens": 4444,
+     "build_ok": true,
+     "build_seconds": 0.305,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.004
+    }
+   ],
+   "program": "lab/vibe/programs3/dsl_calc/rust-0.rs",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "echo_pack",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 54,
+   "hidden": [
+    {
+     "name": "pack_empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_one_byte",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_four_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_five_same",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_zero_run",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_overlap_period3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_tail_short",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_literal_128",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_literal_257",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_hidden_long_match",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_visible_long_match",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_distance_limit",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_distance_just_inside",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_tie_largest_p",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_max_len_131",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_binary_all_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_empty_stream",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_zero_run",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_custom_valid",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_overlap_dist1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_empty_input",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_bad_magic",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_short_length",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_truncated_literal",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_truncated_distance",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_dist_zero",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_dist_too_far",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_copy_too_long",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_literal_too_long",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_missing_hash",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_trailing_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_length_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_length_zero_with_token",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_mode",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "pack_random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_corrupt0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt1",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt3",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    }
+   ],
+   "loop_seconds": 18.889,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 7175,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6666,
+     "reply_chars": 4028,
+     "reply_tokens": 7175,
+     "build_ok": true,
+     "build_seconds": 18.886,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because `result` is a list or dict that gets the bool `data[pos + n] != 0` among other values; Python keeps each element's own type (True / 1). write instead: store bools only"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/echo_pack/ail-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "echo_pack",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 54,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4668,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "echo_pack",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 54,
+   "hidden": [
+    {
+     "name": "pack_empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_one_byte",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_four_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_five_same",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_zero_run",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_overlap_period3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_tail_short",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_literal_128",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_literal_257",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_hidden_long_match",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_visible_long_match",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_distance_limit",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_distance_just_inside",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_tie_largest_p",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_max_len_131",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_binary_all_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_empty_stream",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_zero_run",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_custom_valid",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_overlap_dist1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_empty_input",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_bad_magic",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_short_length",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_truncated_literal",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_truncated_distance",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_dist_zero",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_dist_too_far",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_copy_too_long",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_literal_too_long",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_missing_hash",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_trailing_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_length_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_length_zero_with_token",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_mode",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "pack_random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_corrupt0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt1",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt3",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    }
+   ],
+   "loop_seconds": 0.054,
+   "final_run_seconds": 0.054,
+   "reply_tokens": 14723,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4548,
+     "reply_chars": 3942,
+     "reply_tokens": 14723,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.054
+    }
+   ],
+   "program": "lab/vibe/programs3/echo_pack/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "echo_pack",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 54,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4593,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "expense_split",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_amount",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_participant",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_remainder",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_sum",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 4.705,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 5394,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4548,
+     "reply_chars": 1458,
+     "reply_tokens": 5394,
+     "build_ok": true,
+     "build_seconds": 4.701,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because 'balances' is keyed by a str in one place and by something else in another; a dict or a set has one key kind throughout; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/expense_split/ail-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "expense_split",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_amount",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_participant",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_remainder",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_sum",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.155,
+   "final_run_seconds": 0.006,
+   "reply_tokens": 625,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2550,
+     "reply_chars": 1774,
+     "reply_tokens": 625,
+     "build_ok": true,
+     "build_seconds": 0.149,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.006
+    }
+   ],
+   "program": "lab/vibe/programs3/expense_split/go-0.go",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "expense_split",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_amount",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_participant",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_remainder",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_sum",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.07,
+   "final_run_seconds": 0.07,
+   "reply_tokens": 2298,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2430,
+     "reply_chars": 1408,
+     "reply_tokens": 2298,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.07
+    }
+   ],
+   "program": "lab/vibe/programs3/expense_split/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "expense_split",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_amount",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_participant",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_remainder",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "tabs",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_sum",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.365,
+   "final_run_seconds": 0.004,
+   "reply_tokens": 2458,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2475,
+     "reply_chars": 2311,
+     "reply_tokens": 2458,
+     "build_ok": true,
+     "build_seconds": 0.361,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.004
+    }
+   ],
+   "program": "lab/vibe/programs3/expense_split/rust-0.rs",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "gradebook",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "floor",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_sums",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_rows",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 13.095,
+   "final_run_seconds": 0.004,
+   "reply_tokens": 6480,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3963,
+     "reply_chars": 1777,
+     "reply_tokens": 3585,
+     "build_ok": false,
+     "build_seconds": 1.494,
+     "build_error": "/tmp/vibe-gradebook-ail-0-nsnvrh1r/main.py:53:13: not in the subset: `stats[name] = [1, score]` uses `stats` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside), so this is refused. Rewrite: keep the groups in a list of class instances and map each key to its index with a `dict[str, int]`: `@dataclass class G: items: list[str]` `idx: dict[str, int] = {}` `groups: list[G] = []` then `if k not in idx: idx[k] = len(groups); groups.append(G([])) groups[idx[k]].items.append(w)` (or keep parallel li",
+     "compiler": [
+      [
+       "error",
+       "not in the subset: `stats[name] = [1, score]` uses `stats` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside), so thi"
+      ],
+      [
+       "note",
+       "cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "compiler error:\n/tmp/vibe-gradebook-ail-0-nsnvrh1r/main.py:53:13: not in the subset: `stats[name] = [1, score]` uses `stats` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside), so this is refused. Rewrite: keep the groups in a list of class instances and map each key to its index with a `dict[str, int]`: `@dataclass class G: items: list[str]` `idx: dict[str, int] = {}` `groups: list[G] = []` then `if k not in idx: idx[k] = len(groups); groups.append(G([])) groups[idx[k]].items.append(w)` (or keep parallel lists indexed through the int dict). Original refusal: only strict codec errors are supported (the general path could not build this program either); general path: bytes.decode() with the error handler 'surrogateescape' on the general path (built: utf-8, ascii, latin-1; errors strict, ignore, replace)\nnote: /tmp/vibe-gradebook-ail-0-nsnvrh1r/main.py:58: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\n"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 6932,
+     "reply_chars": 1708,
+     "reply_tokens": 2895,
+     "build_ok": true,
+     "build_seconds": 11.597,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because only strict codec errors are supported; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.004
+    }
+   ],
+   "program": "lab/vibe/programs3/gradebook/ail-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "gradebook",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "floor",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_sums",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_rows",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.161,
+   "final_run_seconds": 0.007,
+   "reply_tokens": 5584,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 1965,
+     "reply_chars": 1604,
+     "reply_tokens": 5584,
+     "build_ok": true,
+     "build_seconds": 0.153,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.007
+    }
+   ],
+   "program": "lab/vibe/programs3/gradebook/go-0.go",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "gradebook",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "floor",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_sums",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_rows",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.068,
+   "final_run_seconds": 0.068,
+   "reply_tokens": 3894,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 1845,
+     "reply_chars": 1264,
+     "reply_tokens": 3894,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.068
+    }
+   ],
+   "program": "lab/vibe/programs3/gradebook/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "gradebook",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "floor",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_sums",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_rows",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.322,
+   "final_run_seconds": 0.004,
+   "reply_tokens": 3466,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 1890,
+     "reply_chars": 2272,
+     "reply_tokens": 3466,
+     "build_ok": true,
+     "build_seconds": 0.319,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.004
+    }
+   ],
+   "program": "lab/vibe/programs3/gradebook/rust-0.rs",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "ini_merge",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "default_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_sections",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "spaces_in_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 10.627,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 3441,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4477,
+     "reply_chars": 1335,
+     "reply_tokens": 3441,
+     "build_ok": true,
+     "build_seconds": 10.624,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because `sections[current] = {}` uses `sections` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-key"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/ini_merge/ail-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "ini_merge",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "default_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_sections",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "spaces_in_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.181,
+   "final_run_seconds": 0.008,
+   "reply_tokens": 1407,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2479,
+     "reply_chars": 1539,
+     "reply_tokens": 1407,
+     "build_ok": true,
+     "build_seconds": 0.173,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.008
+    }
+   ],
+   "program": "lab/vibe/programs3/ini_merge/go-0.go",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "ini_merge",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "default_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_sections",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "spaces_in_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.052,
+   "final_run_seconds": 0.052,
+   "reply_tokens": 1803,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2359,
+     "reply_chars": 1182,
+     "reply_tokens": 1803,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.052
+    }
+   ],
+   "program": "lab/vibe/programs3/ini_merge/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "ini_merge",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 14,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "default_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_section",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "duplicate_sections",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "spaces_in_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.328,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 4322,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2404,
+     "reply_chars": 2036,
+     "reply_tokens": 4322,
+     "build_ok": true,
+     "build_seconds": 0.326,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/ini_merge/rust-0.rs",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "jsonl_stats",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4314,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 180s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 180s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "jsonl_stats",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2316,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "jsonl_stats",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "escapes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_users",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_tag_and_default",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.067,
+   "final_run_seconds": 0.067,
+   "reply_tokens": 2892,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2196,
+     "reply_chars": 2095,
+     "reply_tokens": 2892,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.067
+    }
+   ],
+   "program": "lab/vibe/programs3/jsonl_stats/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "jsonl_stats",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2241,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 120s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 120s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "ledger_bin",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 8860,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "ledger_bin",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "header_only_strict",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_file",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "short_header",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_magic",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_version",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_flags",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_opcode_0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_opcode_6",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_padding",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_zero_padding_id",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_5_bytes_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "varint_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_6_bytes",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_long_valid_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "truncated_in_varint",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_before_check",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_name_len",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_in_name",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_zero",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_33",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_32",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "name_with_space",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_bad_byte_before_truncation",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_del_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "note_truncated",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "note_empty_and_binary",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "check_wrong",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "structural_after_strict_reject",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "strict_no_rejection",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "strict_funds",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "strict_self",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "strict_dup_of_shut",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "reject_order",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "move_exact_balance",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "shut_keeps_balance",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_ties",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_excludes_shut",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_shut",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "extreme_ids_amounts",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reject_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "corrupt0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt1",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt3",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "cut_short",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    }
+   ],
+   "loop_seconds": 0.057,
+   "final_run_seconds": 0.057,
+   "reply_tokens": 21145,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6742,
+     "reply_chars": 6337,
+     "reply_tokens": 21145,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.057
+    }
+   ],
+   "program": "lab/vibe/programs3/ledger_bin/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "ledger_bin",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "header_only_strict",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_file",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "short_header",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_magic",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_version",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_flags",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_opcode_0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "bad_opcode_6",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_padding",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_zero_padding_id",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_5_bytes_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "varint_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_6_bytes",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "varint_long_valid_value",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "truncated_in_varint",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_before_check",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_name_len",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "truncated_in_name",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_zero",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_33",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_len_32",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "name_with_space",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_bad_byte_before_truncation",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "name_del_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "note_truncated",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "note_empty_and_binary",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "check_wrong",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "structural_after_strict_reject",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "strict_no_rejection",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "strict_funds",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "strict_self",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "strict_dup_of_shut",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "reject_order",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "move_exact_balance",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "shut_keeps_balance",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_ties",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top_excludes_shut",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_shut",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "extreme_ids_amounts",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reject_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 3,
+     "expected_exit": 3
+    },
+    {
+     "name": "corrupt0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt1",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "corrupt3",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "cut_short",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    }
+   ],
+   "loop_seconds": 0.453,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 14063,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6787,
+     "reply_chars": 8808,
+     "reply_tokens": 14063,
+     "build_ok": true,
+     "build_seconds": 0.45,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/ledger_bin/rust-0.rs",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "log_levels",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 3,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_message",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_line",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_levels",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_spaces",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 20.497,
+   "final_run_seconds": 0.004,
+   "reply_tokens": 5266,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4145,
+     "reply_chars": 1414,
+     "reply_tokens": 1390,
+     "build_ok": false,
+     "build_seconds": 0.637,
+     "build_error": "/tmp/vibe-log_levels-ail-0-93q_qbzw/main.py:6:5: not in the subset: only strict codec errors are supported (the general path could not build this program either); general path: bytes.decode() with the error handler 'surrogateescape' on the general path (built: utf-8, ascii, latin-1; errors strict, ignore, replace)\n",
+     "compiler": [
+      [
+       "error",
+       "not in the subset: only strict codec errors are supported (the general path could not build this program either); general path: bytes.decode() with the error handler 'surrogateescape' on the general path (built: utf-8, a"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "compiler error:\n/tmp/vibe-log_levels-ail-0-93q_qbzw/main.py:6:5: not in the subset: only strict codec errors are supported (the general path could not build this program either); general path: bytes.decode() with the error handler 'surrogateescape' on the general path (built: utf-8, ascii, latin-1; errors strict, ignore, replace)\n"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 5987,
+     "reply_chars": 1478,
+     "reply_tokens": 989,
+     "build_ok": true,
+     "build_seconds": 9.948,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because 'levels' is a slist; only an array, a list, a list of floats, a set, a dict, bytes and a list of str are walked as flat sequences here. write instead: loop over the ro"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [
+      "unicode"
+     ],
+     "run_seconds": 0.004,
+     "error_sent": "public case 'unicode' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nlines 2 bad 0\nlevel TRACE count 0 chars 0 longest 0\nlevel DEBUG count 0 chars 0 longest 0\nlevel INFO count 2 chars 10 longest 8\nlevel WARN count 0 chars 0 longest 0\nlevel ERROR count 0 chars 0 longest 0\nlevel FATAL count 0 chars 0 longest 0\n\nprogram stderr:\nAIL internal error: decode: a code point above U+FFFF in the 16-bit v2 runtime\n"
+    },
+    {
+     "round": 3,
+     "prompt_chars": 6147,
+     "reply_chars": 1595,
+     "reply_tokens": 2887,
+     "build_ok": true,
+     "build_seconds": 9.905,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because 'LEVEL_BYTES' is a module-level list of non-numbers; only an int/float/str/bytes literal, or a numeric list or tuple, is accepted as a module constant. write instead: "
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.004
+    }
+   ],
+   "program": "lab/vibe/programs3/log_levels/ail-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "log_levels",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_message",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_line",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_levels",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_spaces",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.155,
+   "final_run_seconds": 0.005,
+   "reply_tokens": 1414,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2147,
+     "reply_chars": 1265,
+     "reply_tokens": 1414,
+     "build_ok": true,
+     "build_seconds": 0.149,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.005
+    }
+   ],
+   "program": "lab/vibe/programs3/log_levels/go-0.go",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "log_levels",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_message",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_line",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_levels",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_spaces",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.068,
+   "final_run_seconds": 0.068,
+   "reply_tokens": 1368,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2027,
+     "reply_chars": 1375,
+     "reply_tokens": 1368,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.068
+    }
+   ],
+   "program": "lab/vibe/programs3/log_levels/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "log_levels",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_message",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_line",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_levels",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_spaces",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.149,
+   "final_run_seconds": 0.004,
+   "reply_tokens": 1918,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2072,
+     "reply_chars": 1698,
+     "reply_tokens": 1918,
+     "build_ok": true,
+     "build_seconds": 0.146,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.004
+    }
+   ],
+   "program": "lab/vibe/programs3/log_levels/rust-0.rs",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "matrix_stats",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 18,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4148,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 180s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 180s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "matrix_stats",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 18,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2150,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "matrix_stats",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 18,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2030,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 120s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 120s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "matrix_stats",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 18,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2075,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 120s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 120s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "rail_transfer",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 21,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4885,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "rail_transfer",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 21,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2767,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 120s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 120s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "rail_transfer",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 21,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2812,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "scar_life",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 50,
+   "hidden": [
+    {
+     "name": "gens_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "gens_leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_rule",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "born_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_codes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "high_codes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_dead",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_alive_stays",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_alive_dies",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "width_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "height_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "width_two",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "two_by_two",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "torus_wrap",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "scars_block_birth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_a",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_b",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_c",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_d",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_e",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "gens_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "rule_lowercase",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_lower_code",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_repeat",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_code_D",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_missing_slash",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_extra",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_swapped",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_plus",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_empty",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "three_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_input",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_leading_zero",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_zero",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_two_spaces",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "short_row",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "long_row",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "too_few_rows",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "too_many_rows",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "trailing_empty_line",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_char_x",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_char_O",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "max_width_row",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 5.803,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 7452,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 5722,
+     "reply_chars": 4334,
+     "reply_tokens": 7452,
+     "build_ok": true,
+     "build_seconds": 5.8,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because parse_rule returns a tuple on one path and a single value on another; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/scar_life/ail-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "scar_life",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 50,
+   "hidden": [
+    {
+     "name": "gens_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "gens_leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_rule",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "born_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_codes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "high_codes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_dead",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_alive_stays",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_alive_dies",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "width_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "height_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "width_two",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "two_by_two",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "torus_wrap",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "scars_block_birth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_a",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_b",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_c",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_d",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_e",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "gens_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "rule_lowercase",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_lower_code",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_repeat",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_code_D",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_missing_slash",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_extra",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_swapped",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_plus",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_empty",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "three_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_input",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_leading_zero",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_zero",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_two_spaces",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "short_row",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "long_row",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "too_few_rows",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "too_many_rows",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "trailing_empty_line",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_char_x",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_char_O",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "max_width_row",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.066,
+   "final_run_seconds": 0.066,
+   "reply_tokens": 18584,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3604,
+     "reply_chars": 3633,
+     "reply_tokens": 18584,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.066
+    }
+   ],
+   "program": "lab/vibe/programs3/scar_life/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "scar_life",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 50,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3649,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "tally_lang",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 72,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 9001,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "tally_lang",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 72,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6883,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 120s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 120s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "tally_lang",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 72,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6928,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "term_rank",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 40,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_separator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "separators_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "not_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "cr_separator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "joiners",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "joiner_digits",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "number_terms",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "stop_words",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "suffix_rules",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "suffix_after_join",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "short_tokens",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "non_ascii_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "control_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "ties_bytewise",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_order",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_plus",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_empty",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_not_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_docs_between",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "df_effect",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_tf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random6",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random7",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random8",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random9",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 12.961,
+   "final_run_seconds": 0.004,
+   "reply_tokens": 12451,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6925,
+     "reply_chars": 4533,
+     "reply_tokens": 12451,
+     "build_ok": true,
+     "build_seconds": 12.957,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because .encode() on a str: only str.encode() and bytes.decode() with literal UTF-8 and strict errors are supported. write instead: `s.encode()` (UTF-8 only, no arguments but "
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.004
+    }
+   ],
+   "program": "lab/vibe/programs3/term_rank/ail-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "term_rank",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 40,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_separator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "separators_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "not_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "cr_separator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "joiners",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "joiner_digits",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "number_terms",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "stop_words",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "suffix_rules",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "suffix_after_join",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "short_tokens",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "non_ascii_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "control_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "ties_bytewise",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_order",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "k_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_plus",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_empty",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "k_not_number",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_docs_between",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "df_effect",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_tf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random6",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random7",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random8",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random9",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.064,
+   "final_run_seconds": 0.064,
+   "reply_tokens": 13701,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4807,
+     "reply_chars": 2956,
+     "reply_tokens": 13701,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.064
+    }
+   ],
+   "program": "lab/vibe/programs3/term_rank/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "term_rank",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 40,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4852,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "ticket_audit",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 88,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6012,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 120s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 120s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "ticket_audit",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 88,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6057,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "todo_file",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 1,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_newlines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reuse_after_remove",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "id_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "sort_numeric",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_text_trailing",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_len",
+     "status": "loud_stop",
+     "exit": 1,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 5.704,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 16330,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4956,
+     "reply_chars": 4289,
+     "reply_tokens": 16330,
+     "build_ok": true,
+     "build_seconds": 5.702,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because the constant None; this language has no null value, so nothing holds one -- build a linked structure as parallel index lists (left[] and right[] of int, -1 where Pytho"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/todo_file/ail-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "todo_file",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_newlines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reuse_after_remove",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "id_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "sort_numeric",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_text_trailing",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_len",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.164,
+   "final_run_seconds": 0.005,
+   "reply_tokens": 10919,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2958,
+     "reply_chars": 3471,
+     "reply_tokens": 10919,
+     "build_ok": true,
+     "build_seconds": 0.159,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.005
+    }
+   ],
+   "program": "lab/vibe/programs3/todo_file/go-0.go",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "todo_file",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 1,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_newlines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf_text",
+     "status": "silent_wrong",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reuse_after_remove",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "id_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "sort_numeric",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_text_trailing",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_len",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.054,
+   "final_run_seconds": 0.054,
+   "reply_tokens": 10584,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2838,
+     "reply_chars": 4333,
+     "reply_tokens": 10584,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.054
+    }
+   ],
+   "program": "lab/vibe/programs3/todo_file/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "todo_file",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": true,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 1,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "only_newlines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf_text",
+     "status": "silent_wrong",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "reuse_after_remove",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "id_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "sort_numeric",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_text_trailing",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_len",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.319,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 15935,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2883,
+     "reply_chars": 6663,
+     "reply_tokens": 15935,
+     "build_ok": true,
+     "build_seconds": 0.316,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/todo_file/rust-0.rs",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "tree_fold",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4574,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 120s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 120s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "tree_fold",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4619,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 90s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 90s"
+    }
+   ],
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "version_sort",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "numeric_vs_alpha",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_fewer",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "equal_precedence_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 11.937,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 4183,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 4580,
+     "reply_chars": 3044,
+     "reply_tokens": 4183,
+     "build_ok": true,
+     "build_seconds": 11.934,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because key= must be a lambda or a function name. write instead: key=lambda x: x[1], or key=len; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/version_sort/ail-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "version_sort",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "numeric_vs_alpha",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_fewer",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "equal_precedence_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.318,
+   "final_run_seconds": 0.005,
+   "reply_tokens": 12674,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2582,
+     "reply_chars": 3989,
+     "reply_tokens": 10900,
+     "build_ok": true,
+     "build_seconds": 0.157,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [
+      "basic",
+      "builds"
+     ],
+     "run_seconds": 0.006,
+     "error_sent": "public case 'basic' failed.\nprogram exit 0, expected 0\nprogram stdout:\nbad 0 sorted 7\n1.2.0\n1.2.0-alpha\n1.2.0-alpha.1\n1.2.0-alpha.beta\n1.2.0-beta\n1.10.0\n2.0.0\n\nexpected stdout:\nbad 0 sorted 7\n1.2.0-alpha\n1.2.0-alpha.1\n1.2.0-alpha.beta\n1.2.0-beta\n1.2.0\n1.10.0\n2.0.0\n\n\npublic case 'builds' failed.\nprogram exit 0, expected 0\nprogram stdout:\nbad 0 sorted 5\n1.0.0\n1.0.0+build.1\n1.0.0+build.9\n1.0.0-rc.1\n1.0.0-rc.1+meta\n\nexpected stdout:\nbad 0 sorted 5\n1.0.0-rc.1\n1.0.0-rc.1+meta\n1.0.0\n1.0.0+build.1\n1.0.0+build.9\n"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 7176,
+     "reply_chars": 3988,
+     "reply_tokens": 1774,
+     "build_ok": true,
+     "build_seconds": 0.15,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.005
+    }
+   ],
+   "program": "lab/vibe/programs3/version_sort/go-0.go",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "version_sort",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "numeric_vs_alpha",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_fewer",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "equal_precedence_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.064,
+   "final_run_seconds": 0.064,
+   "reply_tokens": 6279,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2462,
+     "reply_chars": 2437,
+     "reply_tokens": 6279,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.064
+    }
+   ],
+   "program": "lab/vibe/programs3/version_sort/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "version_sort",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 13,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "blank_lines",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "numeric_vs_alpha",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "prefix_fewer",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "int64_edges",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "equal_precedence_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.27,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 11794,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 2507,
+     "reply_chars": 4823,
+     "reply_tokens": 11794,
+     "build_ok": true,
+     "build_seconds": 0.268,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/version_sort/rust-0.rs",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "word_freq",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "apostrophes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "digits_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top20_cutoff",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "repeat_many",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "mixed_case",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 30.438,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 840,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3630,
+     "reply_chars": 528,
+     "reply_tokens": 840,
+     "build_ok": true,
+     "build_seconds": 30.434,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because a method on Call; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/word_freq/ail-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "word_freq",
+   "lang": "go",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "apostrophes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "digits_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top20_cutoff",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "repeat_many",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "mixed_case",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.156,
+   "final_run_seconds": 0.005,
+   "reply_tokens": 444,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 1632,
+     "reply_chars": 1153,
+     "reply_tokens": 444,
+     "build_ok": true,
+     "build_seconds": 0.151,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.005
+    }
+   ],
+   "program": "lab/vibe/programs3/word_freq/go-0.go",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "word_freq",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "apostrophes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "digits_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top20_cutoff",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "repeat_many",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "mixed_case",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.051,
+   "final_run_seconds": 0.051,
+   "reply_tokens": 901,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 1512,
+     "reply_chars": 828,
+     "reply_tokens": 901,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.051
+    }
+   ],
+   "program": "lab/vibe/programs3/word_freq/python-0.py",
+   "model": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "task": "word_freq",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 1,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 12,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unicode_separators",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "apostrophes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "digits_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "top20_cutoff",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "repeat_many",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "mixed_case",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.284,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 608,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 1557,
+     "reply_chars": 1186,
+     "reply_tokens": 608,
+     "build_ok": true,
+     "build_seconds": 0.281,
+     "build_error": "",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe/programs3/word_freq/rust-0.rs",
+   "model": "deepseek/deepseek-v4.1-flash"
+  }
+ ],
+ "summary": {
+  "deepseek/deepseek-v4.1-flash": {
+   "python": {
+    "n": 21,
+    "correct": 14,
+    "public_pass": 15,
+    "gave_up": 6,
+    "silent_wrong": 1,
+    "loud_stop": 0,
+    "other_wrong": 0,
+    "rounds_median": 1,
+    "reply_tokens": 127470,
+    "tokens_per_correct": 9105.0,
+    "surface_error_rounds": 0,
+    "loop_seconds": 0.93,
+    "final_run_seconds": 0.927,
+    "paths": null
+   },
+   "rust": {
+    "n": 21,
+    "correct": 10,
+    "public_pass": 11,
+    "gave_up": 10,
+    "silent_wrong": 1,
+    "loud_stop": 0,
+    "other_wrong": 0,
+    "rounds_median": 1,
+    "reply_tokens": 72158,
+    "tokens_per_correct": 7215.8,
+    "surface_error_rounds": 0,
+    "loop_seconds": 3.46,
+    "final_run_seconds": 0.037,
+    "paths": null
+   },
+   "go": {
+    "n": 13,
+    "correct": 9,
+    "public_pass": 9,
+    "gave_up": 4,
+    "silent_wrong": 0,
+    "loud_stop": 0,
+    "other_wrong": 0,
+    "rounds_median": 1,
+    "reply_tokens": 51040,
+    "tokens_per_correct": 5671.1,
+    "surface_error_rounds": 0,
+    "loop_seconds": 2.21,
+    "final_run_seconds": 0.052,
+    "paths": null
+   },
+   "ail": {
+    "n": 18,
+    "correct": 10,
+    "public_pass": 11,
+    "gave_up": 7,
+    "silent_wrong": 0,
+    "loud_stop": 1,
+    "other_wrong": 0,
+    "rounds_median": 1,
+    "reply_tokens": 80077,
+    "tokens_per_correct": 8007.7,
+    "surface_error_rounds": 0,
+    "loop_seconds": 147.14,
+    "final_run_seconds": 0.037,
+    "paths": {
+     "typed": 0,
+     "general": 11,
+     "refused": 0
+    }
+   }
+  }
+ },
+ "ail_errors": {
+  "deepseek/deepseek-v4.1-flash": [
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because the constant None; this language has no null value, so nothing holds one -- build a linked structure as parallel index lists (left[] and right[] of int, -1 where Pytho",
+    "occurrences": 2,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because 'LEVEL_BYTES' is a module-level list of non-numbers; only an int/float/str/bytes literal, or a numeric list or tuple, is accepted as a module constant. write instead: ",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because 'balances' is keyed by a str in one place and by something else in another; a dict or a set has one key kind throughout; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because 'levels' is a slist; only an array, a list, a list of floats, a set, a dict, bytes and a list of str are walked as flat sequences here. write instead: loop over the ro",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because .encode() on a str: only str.encode() and bytes.decode() with literal UTF-8 and strict errors are supported. write instead: `s.encode()` (UTF-8 only, no arguments but ",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because `result` is a list or dict that gets the bool `data[pos + n] != 0` among other values; Python keeps each element's own type (True / 1). write instead: store bools only",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because `sections[current] = {}` uses `sections` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-key",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because a method on Call; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because key= must be a lambda or a function name. write instead: key=lambda x: x[1], or key=len; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because only strict codec errors are supported; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because parse_rule returns a tuple on one path and a single value on another; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "error",
+    "message": "not in the subset: `stats[name] = [1, score]` uses `stats` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside), so thi",
+    "occurrences": 1,
+    "fixed_next": 1,
+    "fixed_rate": 1.0
+   },
+   {
+    "kind": "error",
+    "message": "not in the subset: only strict codec errors are supported (the general path could not build this program either); general path: bytes.decode() with the error handler 'surrogateescape' on the general path (built: utf-8, a",
+    "occurrences": 1,
+    "fixed_next": 1,
+    "fixed_rate": 1.0
+   }
+  ]
+ }
+}

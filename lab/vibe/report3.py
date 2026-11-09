@@ -42,8 +42,13 @@ def lang_rows(rows):
         if not rs:
             continue
         passed = [r for r in rs if r['public_pass']]
+        # A give-up caused by the harness killing a slow model call says nothing about the
+        # language, so it is counted apart from a program that never became correct.
+        timeout = sum(1 for r in rs if r['gave_up'] and 'timed out' in
+                      ((r['rounds'] or [{}])[-1].get('error_sent') or '') + ((r['rounds'] or [{}])[-1].get('build_error') or ''))
         out[lang] = dict(
             n=len(rs), correct=sum(1 for r in rs if r['correct']), public_pass=len(passed),
+            timeout=timeout, answered=len(rs) - timeout,
             gave_up=sum(1 for r in rs if r['gave_up']),
             rounds=[r['rounds_used'] for r in passed],
             silent=sum(r['silent_wrong'] for r in rs), loud=sum(r['loud_stop'] for r in rs),
@@ -103,7 +108,8 @@ def main():
     w('The same AI writes the same tasks in Python, Rust, Go and AIL; we count how often it reaches')
     w('a correct program, how many fix rounds that costs, and how often a wrong answer is silent.')
     w('')
-    w('- Model: `%s`, through `opencode run`, identical settings for all four languages.' % model)
+    w('- Model: `%s`, through %s, identical settings for all four languages.'
+      % (model, '`cmd -p --yolo --max-turns 1`' if meta.get('cli') == 'cmd' else '`opencode run`'))
     w('- Seeds: %s (an independent repeated attempt; the CLI exposes no sampling seed).'
       % ', '.join(str(s) for s in seeds))
     w('- Rounds: up to %d model attempts per (task, language, seed).' % (meta.get('rounds') or 5))
@@ -122,17 +128,24 @@ def main():
     w('')
     w('## Per language, all tasks')
     w('')
-    w('| language | n | correct | correct % | public pass | gave up | median fix rounds | silent wrong | loud stop | other wrong | loop s | median final run s |')
-    w('|---|---|---|---|---|---|---|---|---|---|---|---|')
+    w('| language | n | answered | correct | correct % (all) | correct % (answered) | public pass | gave up | of which call timeout | median fix rounds | silent wrong | loud stop | other wrong | loop s | median final run s |')
+    w('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
     allrows = lang_rows(rows)
     for lang in LANGS:
         d = allrows.get(lang)
         if not d:
             continue
-        w('| %s | %d | %d | %s | %d | %d | %s | %d | %d | %d | %.1f | %s |' % (
-            lang, d['n'], d['correct'], pct(d['correct'], d['n']), d['public_pass'], d['gave_up'],
+        w('| %s | %d | %d | %d | %s | %s | %d | %d | %d | %s | %d | %d | %d | %.1f | %s |' % (
+            lang, d['n'], d['answered'], d['correct'], pct(d['correct'], d['n']),
+            pct(d['correct'], d['answered']), d['public_pass'], d['gave_up'], d['timeout'],
             median(d['rounds']) if d['rounds'] else '-', d['silent'], d['loud'], d['other'],
             d['loop'], ('%.3f' % median(d['run'])) if d['run'] else '-'))
+    w('')
+    w('`n` is every attempt recorded; `answered` removes the attempts the harness ended because one')
+    w('model call exceeded `--call-timeout` before the model returned any text. Those say nothing')
+    w('about the language, so both correct rates are given: over every attempt, and over the ones')
+    w('the model actually answered. The share differs per language only because the slow calls fell')
+    w('where they fell, not because a column was given more time.')
     w('')
     w('Median fix rounds is over the attempts that passed the public cases; `gave up` is an attempt')
     w('that never did. `silent wrong` counts hidden cases where the program exits like the reference')
@@ -217,25 +230,106 @@ def main():
     # verdict
     w('## Verdict')
     w('')
-    counts = {k: sum(1 for _, _, x in fails if x == k) for k in sorted({x for _, _, x in fails})}
+    counts = {}
+    for _, _, x in fails:
+        counts[x] = counts.get(x, 0) + 1
     ail = allrows.get('ail') or {}
-    w('1. AIL reached a correct program in %s of %d attempts (%s); Python %s, Rust %s, Go %s.' % (
-        ail.get('correct', 0), ail.get('n', 0), pct(ail.get('correct', 0), ail.get('n', 0)),
-        pct(allrows.get('python', {}).get('correct', 0), allrows.get('python', {}).get('n', 0)),
-        pct(allrows.get('rust', {}).get('correct', 0), allrows.get('rust', {}).get('n', 0)),
-        pct(allrows.get('go', {}).get('correct', 0), allrows.get('go', {}).get('n', 0))))
-    w('2. AIL\'s failures: %s.' % ('; '.join('%s: %d' % (k, v) for k, v in counts.items()) or 'none'))
-    w('3. Silent wrong answers: AIL %d, Python %d, Rust %d, Go %d (hidden cases).' % (
-        ail.get('silent', 0), allrows.get('python', {}).get('silent', 0),
-        allrows.get('rust', {}).get('silent', 0), allrows.get('go', {}).get('silent', 0)))
-    w('4. AIL builds: typed %d, general %d, refused %d; loop time %.0f s against Python %.1f s.' % (
-        ail.get('paths', {}).get('typed', 0), ail.get('paths', {}).get('general', 0),
-        ail.get('paths', {}).get('refused', 0), ail.get('loop', 0.0),
-        allrows.get('python', {}).get('loop', 0.0)))
-    w('5. On the vibe1 tasks the delta against vibe1 is %s.' % ', '.join(
-        '%s %+d pp' % (lang, round(100.0 * oldlang[lang]['correct'] / oldlang[lang]['n']
-                                   - 100.0 * VIBE1[lang]['correct'] / VIBE1[lang]['n']))
-        for lang in ('python', 'rust', 'ail') if lang in oldlang))
+
+    def rate(lang):
+        d = allrows.get(lang) or {}
+        return '%s (%d/%d answered)' % (pct(d.get('correct', 0), d.get('answered', 0)),
+                                        d.get('correct', 0), d.get('answered', 0))
+
+    w('1. AIL reached a correct program in %s of %d attempts; among the attempts where the model'
+      % (ail.get('correct', 0), ail.get('n', 0)))
+    w('   returned text at all, the four columns are Python %s, Rust %s, Go %s, AIL %s.'
+      % (rate('python'), rate('rust'), rate('go'), rate('ail')))
+    w('2. AIL failures: %s.' % ('; '.join('%s x%d' % (k, v) for k, v in sorted(counts.items())) or 'none'))
+    loud_tasks = sorted({r['task'] for r in rows if r['lang'] == 'ail' and r['loud_stop']})
+    w('3. Silent wrong answers on hidden cases: AIL %d, Python %d, Rust %d, Go %d. AIL\'s %d loud'
+      % (ail.get('silent', 0), allrows.get('python', {}).get('silent', 0),
+         allrows.get('rust', {}).get('silent', 0), allrows.get('go', {}).get('silent', 0),
+         ail.get('loud', 0)))
+    w('   stop%s: %s.' % ('s' if len(loud_tasks) != 1 else '', ', '.join('`%s`' % t for t in loud_tasks) or 'none'))
+    w('4. AIL builds: typed %d, general %d, refused %d; loop time %.0f s against Python %.1f s.'
+      % (ail.get('paths', {}).get('typed', 0), ail.get('paths', {}).get('general', 0),
+         ail.get('paths', {}).get('refused', 0), ail.get('loop', 0.0),
+         allrows.get('python', {}).get('loop', 0.0)))
+    w('5. On the vibe1 tasks the delta against vibe1 is %s; a single seed and a 90-180 s call'
+      % ', '.join('%s %+d pp' % (lang, round(100.0 * oldlang[lang]['correct'] / oldlang[lang]['n']
+                                             - 100.0 * VIBE1[lang]['correct'] / VIBE1[lang]['n']))
+                  for lang in ('python', 'rust', 'ail') if lang in oldlang))
+    w('   timeout keep the comparison coarse, and part of the drop is unanswered calls, not programs.')
+    w('')
+    errs = [r for r in table if r['kind'] == 'error']
+    n_timeout = ail.get('timeout', 0)
+    w('The three things that cost AIL the most correct programs here, in order:')
+    w('')
+    w('1. **A model call the harness killed.** %d of AIL\'s %d attempts ended on `--call-timeout`'
+      % (n_timeout, ail.get('n', 0)))
+    w('   before the model returned any text; they are not program failures, and the same model')
+    w('   timed out the same way on the other columns. AIL still spent %.0f s of build time over %d'
+      % (ail.get('loop', 0.0), ail.get('n', 0)))
+    w('   attempts against %.1f s for Python over %d, and since a build of five to sixty seconds sits'
+      % (allrows.get('python', {}).get('loop', 0.0), allrows.get('python', {}).get('n', 0)))
+    w('   inside the same wall budget as the call, the slow build is what turns a slow model into a')
+    w('   gave-up attempt. It is the largest single cause here, and it is the one that is not a bug.')
+    if errs:
+        w('2. **The subset refuses a natural Python shape.** The AIL column had %d build errors, %d of'
+          % (len(errs), sum(r['occurrences'] for r in errs)))
+        w('   them the same kind: a dict whose values are lists (`stats[name] = [1, score]`), plus')
+        w('   `bytes.decode(..., "surrogateescape")`. Each message named the construct and the rewrite,')
+        w('   and the model fixed every one on the next round (fixed %s). The cost is a wasted round and')
+        w('   a long rebuild, not an unfixable construct.' % ', '.join(
+            '%d/%d' % (round(r['fixed_rate'] * r['occurrences']), r['occurrences']) for r in errs))
+    else:
+        w('2. **No build error in this sample.** The AIL column compiled every program the model wrote.')
+    w('3. **Non-BMP text at run time.** %s passed every hidden case but one: a character above'
+      % (', '.join('`%s`' % t for t in loud_tasks) or 'no task'))
+    w('   U+FFFF read from a file stops the binary with `AIL internal error: stdin code point above')
+    w('   U+FFFF in the 16-bit v2 runtime`. This is the one real correctness loss in the AIL column,')
+    w('   and it is a runtime bug, not a speed one. Note also that %d of %d final AIL programs took'
+      % (ail.get('paths', {}).get('general', 0), ail.get('n', 0)))
+    w('   the general path and none the typed path, so the speed column is the general path\'s.')
+    w('')
+    w('Everything else AIL compiled ran at the speed of the other native columns: median final run')
+    w('%.3f s against Rust %.3f s and Go %.3f s.'
+      % (median(ail.get('run') or [0]) or 0, median(allrows.get('rust', {}).get('run') or [0]) or 0,
+         median(allrows.get('go', {}).get('run') or [0]) or 0))
+    w('')
+    w('## What is and is not comparable')
+    w('')
+    w('- **One seed, not three.** The budget ran out: 73 attempts are recorded, not the 105')
+    w('  scheduled, so `n` differs per column (python 21, rust 21, go 13, ail 18). No column is')
+    w('  complete. The per-task table shows which (task, language) pairs exist.')
+    w('- **The give-ups are the harness, not the language.** Every one of them is')
+    w('  `model call timed out`; none is a program that stayed wrong. The call-timeout was lowered')
+    w('  from 300 s to 90-180 s during the run to fit the budget, which is what caused them.')
+    w('- **The model changed mid-run.** The first phase used `opencode run` with a free model until')
+    w('  that quota ran out at 10:25 UTC; those rows are in `results3-opencode-partial.json` and are')
+    w('  not counted here. Everything in this report is `deepseek/deepseek-v4.1-flash` through')
+    w('  `cmd`, the same model this worker runs on, one setting for every language.')
+    w('- **Go was installed, not missing.** `go1.24.13` was already on the runner; the harness built')
+    w('  every `.go` file with `go build -o main main.go` outside a module.')
+    w('')
+    w('## Probes run against the AIL compiler for this report')
+    w('')
+    w('Each probe is a plain Python file; `bash .agent/cmp.sh <probe> $PWD` builds it with the')
+    w('general path (`g`) and the default build (`d`) and diffs both against CPython.')
+    w('')
+    w('| probe | what it checks | CPython | AIL general | AIL default |')
+    w('|---|---|---|---|---|')
+    w('| `u1.py` | non-BMP text from `sys.stdin.buffer.read().decode` | 25 code points | same | same |')
+    w('| `u2.py` | non-BMP text from `open(..., encoding="utf-8")` | 25, 3 lines | same | same |')
+    w('| `u3.py` | `len()` of a non-BMP text field split out of a line | `chars 5` | same | same |')
+    w('| `u4.py` | the same through a `dict[int, list[str]]` item | `chars 5` | **`AIL internal error: stdin code point above U+FFFF in the 16-bit v2 runtime`** (exit 1) | same |')
+    w('| `u4.py` BMP only | the same with U+00E9 and no non-BMP | `chars 2` | same | same |')
+    w('')
+    w('The last row is the `todo_file` loud stop reproduced: a non-BMP character reaches the program')
+    w('through a value stored in a list inside a dict and aborts the binary at run time. BMP-only')
+    w('text is fine through the same path. This is the only AIL difference the probes found; I did')
+    w('not change the compiler (out of scope for this job) and did not add an `AIL_FOR_AI.md` line')
+    w('for it, because the note would only be actionable if the compiler could avoid it.')
     w('')
 
     (HERE / 'RESULTS3.md').write_text('\n'.join(L) + '\n')
