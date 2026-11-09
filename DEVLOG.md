@@ -1,3 +1,31 @@
+## 2026-11-08 -- fz243: the reported seed does not reproduce on this tree; no code changed (job-fz243-11090607)
+
+The daily fuzzer (run 42517310228, seed `2076519205`, CPython 3.12, modes default+ir) recorded
+`line 11: cpython='-18' ail='12abc'`: four extra `12abc` lines from `h0`'s `while w4 < 4` body
+(8 prints instead of 4), shifting every later line.
+
+On this tree the seed matches CPython exactly. `python3 lab/fuzz/gen.py 2076519205 -o /tmp/fz-gen.py`
+is byte-identical to the posted reproducer, and:
+`bash ~/tools/cmp.sh /tmp/probes/fz243.py $PWD` gives `g same stdout` and `d same stdout` (exit 1
+both); `bash ~/tools/cmpu.sh ...` gives `off same` and `on same`;
+`python3 lab/fuzz/run.py --start 2076519205 --count 1 --jobs 1` classes both modes as `same`
+(`default | 1 same`, `ir | 1 same`).  An explicit flag matrix (5 builds: `AIL_IR=0`, `AIL_IR=1`,
+each with and without `AIL_UNIFIED_FORCE=1`, plus `AIL_EXACT_INT=1`) is also identical: 4 `12abc`
+lines and exit 1, like CPython.  The binaries are native ELF (no CPython fallback), and 8 consecutive
+runs of each IR binary print `12abc` 4 times, so the old output was not nondeterminism.
+
+The earlier 8-line output needed a duplicated while body (or a skipped `w4 += 1`) that the current
+emitters do not produce; I found no way to reach it through the general, typed, unified or exact-int
+paths.  Per the instruction for a non-reproducing seed, nothing was changed: no compiler source and
+no test module.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `fz243` (the seed) matches; `sanity_diff`
+(computed `%d` template), `sanity_alias` (list alias append), `sanity_rev` (`reversed(dict)`),
+`sanity_ba` (bytearray `*=` alias), `sanity_du` (dict `|`) and `sanity_mod` (`x % 0` in a lambda)
+also match.  `sanity_utf` (non-BMP `bytes.decode`) and `sanity_int` (`int('9999999999999999999')`)
+are refused by name (`not in the subset`, `int64 constant expression out of range`), as documented.
+No other differences were seen in this reproducer.
+
 ## 2026-11-08 -- aiknow1: agent-facing AIL material (job-aiknow1-11081958)
 
 Adds `llms.txt` (llmstxt.org shape, under 150 lines), `docs/AGENT_GUIDE.md` (a worked example with a
