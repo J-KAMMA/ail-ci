@@ -1,29 +1,6 @@
-# CONTINUATION (2026-11-10): the previous run of this job ended with FINAL VERDICT: ERROR, most likely the
-# runner time limit. Your branch already holds the earlier commits: read git log and the DEVLOG first, do NOT
-# redo finished sub-steps, finish the remaining ones, commit and push after each. Keep the run under 4 hours;
-# if a full measurement cannot fit, cut seeds/sizes and say so in the report.
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_agent_integrations test_ail_packaging test_ail_tutorial.
 
-Lane: err
-Needs: err3
-
-# err4: apply the agent format to the other 13 compiler messages
-
-Time budget: 120 minutes. Commit and push after each sub-step. Follow `.agent/` rules (no regressions, CI first).
-
-**Why (owner, 2026-11-07):** AIL is for vibe coding; vibe1 found AI fix rate ~0 after AIL errors. err1 measured and
-designed the fix: `docs/design/AGENT_ERRORS.md` and `lab/err/*` (on integ; if missing, `git fetch origin
-job-err1-11071624` and read them from that branch). Rewritten messages raised the fix rate 0.75 -> 0.92 on the
-15-message set. This job is **Step 3** of that design's "Implementation split"; read the whole section first.
-Rules from the design: position is in the user's file, cause names only the user's identifiers (never `_ail_*`),
-`Replace:`/`With:` is a literal edit that builds on the typed path and keeps output. Never change what a program
-prints; a message rewrite must not turn a building program into a refusal.
-
-## Do
-- `pyfunc.py` (Yield, while-else, dict of containers, tuple refusals), `pyc.py` (fallback template),
-  `strictmode.py` (classification text). Use the exact rewritten texts in `lab/err/messages_rewritten.json`.
-- `test_ail_agent_errors.py`: every message has a location in the user's file, no `_ail_` identifier, and a `With:`
-  block that builds.
-- Update any test that pins old message text (grep tests for the old strings); change text only, never behaviour.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
