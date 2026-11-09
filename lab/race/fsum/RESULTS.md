@@ -50,6 +50,13 @@ export): the 10 `lab/compare/src/*/typed.py` and the 16 `lab/race/reduce/*.py` p
 **22 identical, 0 different.**  The new `PARREDF` part is only added to `ctx.parts` when
 `AIL_PAR_FSUM=fixed`, so a default build never emits it.
 
+Re-checked on this runner with `AIL_PAR_FSUM` unset and a fresh `PYTHONPYCACHEPREFIX`: the ten
+float probes are refused (rc 3) with the old text, `lab/compare/src/berth_sim/typed.py` and
+`lab/race/reduce/edge_max_plus_min.py` build with **zero** `ail_par_fsum` symbols in `program.c`,
+and the same two programs' `program.c` is byte-identical with and without `AIL_PAR_FSUM=fixed`
+(an int reduction does add the unused `PARREDF` runtime block under the opt-in, but stays on the
+int path and prints the same `-1`).
+
 ## Bench (4-thread speedup)
 
 `lab/race/fsum/bench_fsum.py`: `acc += i * 0.001` over 200,000,000 iterations, median of 3
@@ -57,15 +64,29 @@ runs of `/usr/bin/time -f %e`.  This runner: 4 logical CPUs (2 physical cores, 2
 
 | `AIL_THREADS` | runs (s) | median |
 |---|---|---|
-| 1 | 0.17 0.17 0.17 | 0.17 |
-| 2 | 0.09 0.08 0.09 | 0.09 |
-| 4 | 0.06 0.06 0.06 | 0.06 |
+| 1 | 0.16 0.16 0.16 | 0.16 |
+| 2 | 0.08 0.08 0.08 | 0.08 |
+| 4 | 0.05 0.05 0.05 | 0.05 |
 
-4-thread speedup: **0.17 / 0.06 = 2.83x** (target at least 2.5x).  All three thread counts print
-`19999999900000.0`.
+4-thread speedup: **0.16 / 0.05 = 3.2x** (target at least 2.5x; an earlier run of the same bench
+measured 0.17 / 0.06 = 2.83x).  All three thread counts print `19999999900000.0`.
 
 ## Tests
 
 `AIL_CURRENT/test_ail_par_fsum.py` (3 tests): the ten probes match the reference at 1/2/4/16
 threads, three runs each; without the opt-in each is refused with the old text; an
 `AIL_PAR_FSUM` value other than `fixed` does not opt in.
+
+The required modules on the final tree: `test_ail_par_fsum` 3, `test_ail_par_reduce` 3,
+`test_ail_par_reduce_rt` 3, `test_ail_race_probes` 31 (1 expected failure), `test_ail_safetynet`
+5, `test_ail_files` 18 (1 skipped), `test_ail_corpus_findings3` 2 -- all OK.
+
+## Independent self-check (`/tmp/probes`, not committed)
+
+Eight extra probes, built with `AIL_PAR_FSUM=fixed` and run at 1/2/4/16 threads, five runs each,
+against `model.fixed_sum`: `p01_arg` (summand through a float argument), `p02_listitem`
+(`list[float]` item, `acc` starts `-0.0`), `p03_negative` (9000 negative values), `p04_empty`
+(n = 0 keeps `acc`), `p07_manychunks` (20000 values), `p08_mixed` (`1e16, 1.0, -1e16` pattern) all
+matched the reference at every thread count and run.  `p05_attr` (attribute summand) is refused
+`attribute is not allowed in the body`; `p06_dict` is refused at the dict literal (`a dict holds
+integers`).  Without the opt-in every probe is refused by name with the old text.
