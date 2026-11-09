@@ -81,9 +81,9 @@ fn main() {
 REDUCE = r"""
 #include <stdio.h>
 static int64_t term(int64_t i) { return (i % 7) - 3; }
-static void r_rerun(void **args, int64_t lo, int64_t hi, int64_t *acc) {
+static void r_rerun(void **args, int64_t lo, int64_t hi, volatile int64_t **acc) {
     (void)args;
-    for (int64_t i = lo; i < hi; i++) acc[0] += term(i);
+    for (int64_t i = lo; i < hi; i++) *acc[0] += term(i);
 }
 static void r_fn(void **args, int64_t lo, int64_t hi, ail_red_part *p) {
     (void)args;
@@ -93,10 +93,11 @@ static void r_fn(void **args, int64_t lo, int64_t hi, ail_red_part *p) {
 }
 int main(int argc, char **argv) {
     int64_t n = 200000, acc[1] = {0};
+    volatile int64_t *accp[1] = {&acc[0]};
     void *args[1] = {0};
     static ail_par_site site;
-    if (argc > 1) ail_par_reduce_run(r_fn, args, 0, n, &site, 0, 1, acc, r_rerun);
-    else r_rerun(args, 0, n, acc);
+    if (argc > 1) ail_par_reduce_run(r_fn, args, 0, n, &site, 0, 1, accp, r_rerun);
+    else r_rerun(args, 0, n, accp);
     printf("%lld\n", (long long)acc[0]);
     return 0;
 }

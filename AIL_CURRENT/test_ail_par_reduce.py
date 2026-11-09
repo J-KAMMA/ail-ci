@@ -43,11 +43,19 @@ EXC_AFTER = ("BIG = 4611686018427387904\n\n\ndef term(i: int) -> int:\n    if i 
 BIGCHUNK = ("BIG = 4611686018427387904\n\n\ndef main():\n    xs = [0] * 2000\n"
             "    for i in range(0, 2000):\n        xs[i] = -1\n    xs[1000] = BIG\n    xs[1500] = BIG\n"
             "    acc = 0\n    for i in %s(0, 2000):\n        acc += xs[i]\n    print(acc)\nmain()\n")
+TRY = ("def term(i: int) -> int:\n    x = 1e308\n    if i == 3:\n        return int(x * x)\n    return i\n\n\n"
+       "def main():\n    acc = 0\n    try:\n        for i in %s(0, 200):\n            acc += term(i)\n"
+       "    except OverflowError:\n        print(\"caught\", acc)\n    acc += 7\n    print(acc)\nmain()\n")
+LIST_PARAM = ("def total(xs: list[int], n: int) -> int:\n    acc = 0\n"
+              "    for i in %s(0, n):\n        acc += xs[i]\n    return acc\n\n\n"
+              "def main():\n    ys = [0] * 100\n    for i in range(0, 100):\n        ys[i] = i * 2\n"
+              "    print(total(ys, 100))\nmain()\n")
 CASES = {
     "small": SUM, "negative": NEG, "subtract": SUB, "two accumulators": TWO, "list item": LIST,
     "inner loop": INNER, "prefix overflows, total fits": PREFIX, "overflow last": LAST,
     "min overflow": MIN_OVER, "exception before overflow": EXC_BEFORE,
     "exception after overflow": EXC_AFTER, "overflow at a chunk boundary": BIGCHUNK,
+    "reduction inside try": TRY, "list parameter": LIST_PARAM,
     "n zero": "def main():\n    acc = 7\n    for i in %s(0, 0):\n        acc += i\n    print(acc)\nmain()\n",
     "n one": "def main():\n    acc = 7\n    for i in %s(0, 1):\n        acc += i\n    print(acc)\nmain()\n",
 }
@@ -62,9 +70,6 @@ POOL_MAP = ("from multiprocessing import Pool\n\n\ndef sq(x: int) -> int:\n    r
             "    print(acc)\n")
 
 REFUSED = {
-    "try": ("def main():\n    acc = 0\n    try:\n        for i in par_range(0, 10):\n"
-            "            acc += i\n    except OverflowError:\n        print(acc)\nmain()\n",
-            "write instead: put the loop in its own fn"),
     "a float accumulator": ("def main():\n    acc = 0.0\n    for i in par_range(0, 10):\n"
                             "        acc += 1.5\n    print(acc)\nmain()\n", "write instead:"),
     "the accumulator read in the body": ("def main():\n    out = [0] * 10\n    acc = 0\n"
@@ -76,6 +81,10 @@ REFUSED = {
     "a list element written in the same body": (
         "def main():\n    ys = [0] * 100\n    acc = 0\n    for i in par_range(0, 100):\n"
         "        acc += i\n        ys[i] = i\n    print(acc, ys[99])\nmain()\n", "write instead:"),
+    "a parallel for inside an except handler": (
+        "def main():\n    x = 0\n    try:\n        x = 10 // 0\n"
+        "    except ZeroDivisionError:\n        for i in par_range(0, 10):\n            x += i\n"
+        "    print(x)\nmain()\n", "parallel for cannot be inside try"),
 }
 
 

@@ -1,3 +1,61 @@
+## 2026-11-09 -- fbred4 suite fix re-applied: PARRED accumulator ABI and try-body reductions (job-rbfbred4_rr2-11091625)
+
+Re-applied the accepted `job-fbred4_rr2-11091430` change on this tree. The `cruntime.py`,
+`parallel.py` and `pyfunc.py` hunks applied unchanged: the reduction re-run/combine now takes
+`volatile int64_t **accp`, so each accumulator is written back through its pointer into the
+enclosing local; `ail_red_add`/`ail_red_sub` give the same loud int64 stop as the sequential
+loop; a parallel reduction is allowed in a `try` body (but still refused in an `except` handler);
+and `_par_decls` keeps `const` on pointer parameters so list parameters are capturable. The three
+PARRED test harnesses and the `lab/race/reduce` edge probes came in unchanged. `DEVLOG.md` and
+`manifest.d/45.txt` conflicted; both DEVLOG entries are kept (this one, then the accepted entry)
+and `tools/update_manifest.py` regenerated the shard (`--check` passes). `tools/diff_ids.py` is
+not present on this tree, so only the manifest tool ran. No `DIFFERENCES.md` row: the change adds
+none.
+
+Probes (`AIL_THREADS=4 PYTHONPATH=/tmp/probes:$PWD/AIL_CURRENT bash ~/tools/cmp.sh <p> $PWD`;
+a `sitecustomize.py` supplies `par_range = range` to CPython): 15 of 16 `p_wrap_*` probes match
+CPython's stdout and exit on the default build and are refused by name on the general path:
+`p_wrap_small`, `p_wrap_negative`, `p_wrap_two`, `p_wrap_try` (catchable `OverflowError`, the
+handler prints the sequential prefix `caught 3`), `p_wrap_try_zero` (`ZeroDivisionError`,
+`caught 3`), `p_wrap_arg`, `p_wrap_listitem`, `p_wrap_attr`, `p_wrap_dict`, `p_wrap_alias`,
+`p_wrap_smalln` (n = 0 and n = 1), `p_wrap_listparam`, `p_wrap_threeitems`,
+`p_wrap_called_twice`, `p_wrap_int64` (`INT64_MAX + INT64_MIN` = -1). `p_wrap_except_refused` is
+refused by name (`parallel for cannot be inside try`) on the default build. The same 15 probes
+also match CPython at `AIL_THREADS` 1, 2, 4 and 16, and all 12 `lab/race/reduce/edge_*` pairs
+match their sequential AIL twins at those four thread counts (48/48), including the loud int64
+stops.
+
+Tests on the final commit, `-j 2`: `test_ail_par_reduce` (3), `test_ail_par_reduce_rt` (3),
+`test_ail_par_sched` (4), `test_ail_safetynet` (5), `test_ail_files` (18, 1 skipped) and
+`test_ail_corpus_findings3` (2), all OK.
+
+## 2026-11-09 -- fbred4 suite fix: the PARRED harnesses use the pointer-array accumulator ABI (job-fbred4_rr2-11091430)
+
+fbred4 changed the reduction runtime to pass the accumulators as `volatile int64_t **`
+and to have the re-run write each one back through its pointer into the enclosing local,
+which is what keeps the sequential prefix in the accumulator after a `try` catches the
+body's exception.  `test_ail_par_reduce_rt`'s C harness still passed the old `int64_t *`
+shared array, so `ail_red_combine` dereferenced the accumulator values as pointers and the
+parallel child died with SIGSEGV at `AIL_THREADS` 2, 4 and 16 (300-case differential and
+the hand cases).  The harness now builds `volatile int64_t *accp[]` for `red_rerun`,
+`c_rerun` and `red_child`; `test_ail_par_sched`'s `REDUCE` harness had the same stale ABI
+(it only stayed sequential on its 200000-term workload) and is updated the same way.  No
+compiler or runtime file changed.
+
+Probes (`PYTHONPATH=$PWD/AIL_CURRENT bash ~/tools/cmp.sh <p> $PWD`, general and default
+builds; the general path refuses `par_range` by name): `p_acc_try` (catchable
+`OverflowError`, handler prints the sequential prefix), `p_acc_try_zero`
+(`ZeroDivisionError`, prefix `caught 3`), `p_acc_arg` (start from an argument),
+`p_acc_list` (start from a list item), `p_acc_dict` (start from a dict value),
+`p_acc_attr` (start from an attribute), `p_acc_two` (two accumulators, negative range),
+`p_acc_small` (n = 0, n = 1, three items), `p_acc_edge` (`INT64_MAX + INT64_MIN` then
+zeros), `p_acc_alias` (two names for one list), `p_acc_called_twice` (two bases).  All 11
+match CPython on the default build; every general-path build is refused by name.
+
+Tests on the final commit, `-j 2`: `test_ail_par_reduce_rt`, `test_ail_par_sched`,
+`test_ail_par_reduce`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
+
 ## 2026-11-08 -- fz244: keyed list.sort over int64 boundaries already matches CPython (job-fz244-11090611)
 
 The daily fuzzer (seed 2076520850, CPython 3.12, default and `AIL_IR=1`) reported
