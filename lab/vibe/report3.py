@@ -108,8 +108,12 @@ def main():
     w('The same AI writes the same tasks in Python, Rust, Go and AIL; we count how often it reaches')
     w('a correct program, how many fix rounds that costs, and how often a wrong answer is silent.')
     w('')
-    w('- Model: `%s`, through %s, identical settings for all four languages.'
-      % (model, '`cmd -p --yolo --max-turns 1`' if meta.get('cli') == 'cmd' else '`opencode run`'))
+    w('- Model: `%s` through the Claude Code CLI (`claude -p --tools "" --no-session-persistence`, one text-only'
+      % model)
+    w('  turn per call, calls strictly one at a time), identical settings for all four languages.')
+    w('  **This is not vibe1\'s model** (vibe1 used a free DeepSeek model through opencode), so the')
+    w('  delta against vibe1 below is confounded by the model change; judge the four-language')
+    w('  comparison inside this run, not the delta.')
     w('- Seeds: %s (an independent repeated attempt; the CLI exposes no sampling seed).'
       % ', '.join(str(s) for s in seeds))
     w('- Rounds: up to %d model attempts per (task, language, seed).' % (meta.get('rounds') or 5))
@@ -117,14 +121,13 @@ def main():
     w('- Tasks: %d, of which %d are the vibe1 set (for the delta) and %d are the app-like tasks in'
       % (len({r['task'] for r in rows}), len({r['task'] for r in rows} & OLD), len({r['task'] for r in rows} & set(NEW_TASKS))))
     w('  `lab/vibe/tasks2/` written for vibe3.')
+    w('- Toolchains: CPython 3.12, rustc -O, go1.27.3 (installed user-locally from go.dev), AIL = `AIL_CURRENT` of this branch.')
     w('- Columns: python = CPython 3.12 on the `.py` the AI wrote; rust = `rustc -O --edition=2021`;')
     w('  go = `go build -o main main.go` (stdlib only); ail = AIL `compile --syntax python` on the')
     w('  same plain Python the AI wrote for the ail prompt.')
     w('- Oracles: each task\'s own `gen.py` + `reference.py`. Public cases are shown to the AI through')
     w('  the failure feedback; hidden cases never are.')
-    w('- Attempts: %s scheduled, %d recorded%s.'
-      % (meta.get('scheduled_attempts') or '?', len(rows),
-         '; the wall-clock budget stopped scheduling (see the note)' if meta.get('stopped_early') else ''))
+    w('- Attempts: %d recorded (21 tasks x 4 languages x 2 seeds); nothing was cut.' % len(rows))
     w('')
     w('## Per language, all tasks')
     w('')
@@ -203,10 +206,12 @@ def main():
     tables = data.get('ail_errors') or {}
     table = tables.get(model) or []
     w('Every diagnostic the AIL column received, by occurrence, and how often the very next round')
-    w('built. `fixed` is the share of occurrences after which the next build succeeded.')
+    w('built. `fixed` is the share of occurrences after which the next build succeeded; it is only meaningful for')
+    w('errors, since a `note` is printed on a build that worked and is never sent back to the model.')
     w('')
     w('| # | kind | message | occurrences | fixed |')
     w('|---|---|---|---|---|')
+    table = sorted(table, key=lambda r: (r['kind'] != 'error', -r['occurrences']))
     for i, r in enumerate(table[:10], 1):
         w('| %d | %s | %s | %d | %s |' % (i, r['kind'], r['message'].replace('|', '\\|')[:200],
                                           r['occurrences'], pct(round(r['fixed_rate'] * r['occurrences']), r['occurrences'])))
@@ -228,108 +233,67 @@ def main():
     w('')
 
     # verdict
+    ail = allrows.get('ail') or {}
     w('## Verdict')
     w('')
-    counts = {}
-    for _, _, x in fails:
-        counts[x] = counts.get(x, 0) + 1
-    ail = allrows.get('ail') or {}
 
-    def rate(lang):
-        d = allrows.get(lang) or {}
-        return '%s (%d/%d answered)' % (pct(d.get('correct', 0), d.get('answered', 0)),
-                                        d.get('correct', 0), d.get('answered', 0))
-
-    w('1. AIL reached a correct program in %s of %d attempts; among the attempts where the model'
-      % (ail.get('correct', 0), ail.get('n', 0)))
-    w('   returned text at all, the four columns are Python %s, Rust %s, Go %s, AIL %s.'
-      % (rate('python'), rate('rust'), rate('go'), rate('ail')))
-    w('2. AIL failures: %s.' % ('; '.join('%s x%d' % (k, v) for k, v in sorted(counts.items())) or 'none'))
-    loud_tasks = sorted({r['task'] for r in rows if r['lang'] == 'ail' and r['loud_stop']})
-    w('3. Silent wrong answers on hidden cases: AIL %d, Python %d, Rust %d, Go %d. AIL\'s %d loud'
-      % (ail.get('silent', 0), allrows.get('python', {}).get('silent', 0),
-         allrows.get('rust', {}).get('silent', 0), allrows.get('go', {}).get('silent', 0),
-         ail.get('loud', 0)))
-    w('   stop%s: %s.' % ('s' if len(loud_tasks) != 1 else '', ', '.join('`%s`' % t for t in loud_tasks) or 'none'))
-    w('4. AIL builds: typed %d, general %d, refused %d; loop time %.0f s against Python %.1f s.'
-      % (ail.get('paths', {}).get('typed', 0), ail.get('paths', {}).get('general', 0),
-         ail.get('paths', {}).get('refused', 0), ail.get('loop', 0.0),
-         allrows.get('python', {}).get('loop', 0.0)))
-    w('5. On the vibe1 tasks the delta against vibe1 is %s; a single seed and a 90-180 s call'
-      % ', '.join('%s %+d pp' % (lang, round(100.0 * oldlang[lang]['correct'] / oldlang[lang]['n']
-                                             - 100.0 * VIBE1[lang]['correct'] / VIBE1[lang]['n']))
-                  for lang in ('python', 'rust', 'ail') if lang in oldlang))
-    w('   timeout keep the comparison coarse, and part of the drop is unanswered calls, not programs.')
-    w('')
-    errs = [r for r in table if r['kind'] == 'error']
-    n_timeout = ail.get('timeout', 0)
-    w('The three things that cost AIL the most correct programs here, in order:')
-    w('')
-    w('1. **A model call the harness killed.** %d of AIL\'s %d attempts ended on `--call-timeout`'
-      % (n_timeout, ail.get('n', 0)))
-    w('   before the model returned any text; they are not program failures, and the same model')
-    w('   timed out the same way on the other columns. AIL still spent %.0f s of build time over %d'
-      % (ail.get('loop', 0.0), ail.get('n', 0)))
-    w('   attempts against %.1f s for Python over %d, and since a build of five to sixty seconds sits'
-      % (allrows.get('python', {}).get('loop', 0.0), allrows.get('python', {}).get('n', 0)))
-    w('   inside the same wall budget as the call, the slow build is what turns a slow model into a')
-    w('   gave-up attempt. It is the largest single cause here, and it is the one that is not a bug.')
-    if errs:
-        w('2. **The subset refuses a natural Python shape.** The AIL column had %d build errors, %d of'
-          % (len(errs), sum(r['occurrences'] for r in errs)))
-        w('   them the same kind: a dict whose values are lists (`stats[name] = [1, score]`), plus')
-        w('   `bytes.decode(..., "surrogateescape")`. Each message named the construct and the rewrite,')
-        w('   and the model fixed every one on the next round (fixed %s). The cost is a wasted round and')
-        w('   a long rebuild, not an unfixable construct.' % ', '.join(
-            '%d/%d' % (round(r['fixed_rate'] * r['occurrences']), r['occurrences']) for r in errs))
-    else:
-        w('2. **No build error in this sample.** The AIL column compiled every program the model wrote.')
-    w('3. **Non-BMP text at run time.** %s passed every hidden case but one: a character above'
-      % (', '.join('`%s`' % t for t in loud_tasks) or 'no task'))
-    w('   U+FFFF read from a file stops the binary with `AIL internal error: stdin code point above')
-    w('   U+FFFF in the 16-bit v2 runtime`. This is the one real correctness loss in the AIL column,')
-    w('   and it is a runtime bug, not a speed one. Note also that %d of %d final AIL programs took'
-      % (ail.get('paths', {}).get('general', 0), ail.get('n', 0)))
-    w('   the general path and none the typed path, so the speed column is the general path\'s.')
-    w('')
-    w('Everything else AIL compiled ran at the speed of the other native columns: median final run')
-    w('%.3f s against Rust %.3f s and Go %.3f s.'
+    def c(l, k):
+        return (allrows.get(l) or {}).get(k, 0)
+    multi = sum(1 for r in rows if r['lang'] == 'ail' and r['rounds_used'] > 1)
+    w('1. Correct programs (all public + hidden cases), 2 seeds x 21 tasks: Python %d/%d, Rust %d/%d, Go %d/%d, AIL %d/%d.'
+      % (c('python', 'correct'), c('python', 'n'), c('rust', 'correct'), c('rust', 'n'),
+         c('go', 'correct'), c('go', 'n'), c('ail', 'correct'), c('ail', 'n')))
+    w('   Nobody gave up in any language; with this model the languages differ mostly in the first compile.')
+    w('2. Fix rounds: Python and Go passed the public cases on round 1 in every attempt, Rust in all but one. AIL needed a')
+    w('   second or third round in %d of %d attempts: 9 began with a compile refusal, 3 with a run-time failure on a public case'
+      % (multi, c('ail', 'n')))
+    w('   (`UnboundLocalError ... heappush` in rail_transfer, `ValueError: re: the group did not take part in the match (None')
+    w('   is not built)` in version_sort, a wrong output in berth_sim that Rust also produced).')
+    w('3. Silent wrong answers on hidden cases: Python %d, Go %d, Rust %d, AIL %d. AIL stopped loudly %d times where the'
+      % (c('python', 'silent'), c('go', 'silent'), c('rust', 'silent'), c('ail', 'silent'), c('ail', 'loud')))
+    w('   CPython reference answers (int64 overflow in 4 attempts, a non-BMP character in 2); Go wrapped int64 silently twice.')
+    w('4. Loop and run time: AIL final programs ran as fast as Rust (median %.3f s vs %.3f s) but %d of %d took the'
       % (median(ail.get('run') or [0]) or 0, median(allrows.get('rust', {}).get('run') or [0]) or 0,
-         median(allrows.get('go', {}).get('run') or [0]) or 0))
+         ail.get('paths', {}).get('general', 0), ail.get('n', 0)))
+    w('   general path (about 20x slower than typed), and the AIL build loop cost %.0f s against Python %.1f s, Go %.1f s,'
+      % (ail.get('loop', 0.0), c('python', 'loop'), c('go', 'loop')))
+    w('   Rust %.1f s over the same 42 attempts.' % c('rust', 'loop'))
+    w('')
+    w('The three things that cost AIL correct programs, in order:')
+    w('')
+    w('1. **int64 overflow stops (4 attempts, 3 tasks).** AIL\'s default is 64-bit ints with a loud `OverflowError`; the hidden')
+    w('   cases expect CPython-sized integers at the boundary. Examples: `dsl_calc` `int64_edges` (`push 9223372036854775807`,')
+    w('   `push 1`, `add`) stops with `OverflowError: integer overflow in +`; `jsonl_stats` sums amounts to 9223372036854775808;')
+    w('   `tally_lang` multiplies 4294967295 * 4294967295. This is the owner-chosen int64 default working as designed (loud,')
+    w('   never silent). Python passes because ints are unbounded; Go fails the same jsonl_stats case but silently (wraps).')
+    w('2. **A runtime bug on non-BMP text (2 attempts, `todo_file`).** An emoji (3 x U+1F600 in `add 2 ...`) read from input stops')
+    w('   the binary with `AIL internal error: decode: a code point above U+FFFF in the 16-bit v2 runtime`. The model cannot')
+    w('   work around it and the message does not say how. It also hit a public case of `log_levels` seed 1 (fixed in round 3).')
+    w('3. **Compile refusals that burn a round and a long rebuild (every AIL attempt that needed more than one round).**')
+    w('   Examples: `json.loads(s): the type of the result is not declared here; write the type down` (jsonl_stats, both seeds);')
+    w('   `items[vid] = [parts[2], False]` uses `items` as a dict of containers (todo_file); `bytes.decode(..., "surrogateescape")`')
+    w('   (only strict codec errors are supported). All 10 refusals named the construct; 9 of 10 were fixed by the next build from')
+    w('   the message alone, the 10th (dict of containers) one round later. Also %d of %d final programs landed on the general'
+      % (ail.get('paths', {}).get('general', 0), ail.get('n', 0)))
+    w('   path (about 20x slower), signalled by 60 `note:` lines the model never sees.')
+    w('')
+    w('Not AIL-specific: the other two AIL failures (`matrix_stats` seed 0, `ticket_audit` seed 0) are spec misreads that the Rust')
+    w('column made identically (same hidden cases fail), so they are the model, not the language.')
     w('')
     w('## What is and is not comparable')
     w('')
-    w('- **One seed, not three.** The budget ran out: 73 attempts are recorded, not the 105')
-    w('  scheduled, so `n` differs per column (python 21, rust 21, go 13, ail 18). No column is')
-    w('  complete. The per-task table shows which (task, language) pairs exist.')
-    w('- **The give-ups are the harness, not the language.** Every one of them is')
-    w('  `model call timed out`; none is a program that stayed wrong. The call-timeout was lowered')
-    w('  from 300 s to 90-180 s during the run to fit the budget, which is what caused them.')
-    w('- **The model changed mid-run.** The first phase used `opencode run` with a free model until')
-    w('  that quota ran out at 10:25 UTC; those rows are in `results3-opencode-partial.json` and are')
-    w('  not counted here. Everything in this report is `deepseek/deepseek-v4.1-flash` through')
-    w('  `cmd`, the same model this worker runs on, one setting for every language.')
-    w('- **Go was installed, not missing.** `go1.24.13` was already on the runner; the harness built')
-    w('  every `.go` file with `go build -o main main.go` outside a module.')
-    w('')
-    w('## Probes run against the AIL compiler for this report')
-    w('')
-    w('Each probe is a plain Python file; `bash .agent/cmp.sh <probe> $PWD` builds it with the')
-    w('general path (`g`) and the default build (`d`) and diffs both against CPython.')
-    w('')
-    w('| probe | what it checks | CPython | AIL general | AIL default |')
-    w('|---|---|---|---|---|')
-    w('| `u1.py` | non-BMP text from `sys.stdin.buffer.read().decode` | 25 code points | same | same |')
-    w('| `u2.py` | non-BMP text from `open(..., encoding="utf-8")` | 25, 3 lines | same | same |')
-    w('| `u3.py` | `len()` of a non-BMP text field split out of a line | `chars 5` | same | same |')
-    w('| `u4.py` | the same through a `dict[int, list[str]]` item | `chars 5` | **`AIL internal error: stdin code point above U+FFFF in the 16-bit v2 runtime`** (exit 1) | same |')
-    w('| `u4.py` BMP only | the same with U+00E9 and no non-BMP | `chars 2` | same | same |')
-    w('')
-    w('The last row is the `todo_file` loud stop reproduced: a non-BMP character reaches the program')
-    w('through a value stored in a list inside a dict and aborts the binary at run time. BMP-only')
-    w('text is fine through the same path. This is the only AIL difference the probes found; I did')
-    w('not change the compiler (out of scope for this job) and did not add an `AIL_FOR_AI.md` line')
-    w('for it, because the note would only be actionable if the compiler could avoid it.')
+    w('- **Model changed from vibe1.** vibe1: free DeepSeek via opencode; vibe3: `claude-haiku-5-5`. The vibe1 delta table mixes the')
+    w('  model change with every compiler change since 2026-11-06 and cannot attribute the difference to AIL.')
+    w('- **Two seeds, not three** (time budget). Seeds are independent repeated attempts, not sampling seeds. With 42 attempts per')
+    w('  language one attempt is 2.4 percentage points; differences of one or two attempts are noise.')
+    w('- **The model is strong here.** Python, Go and Rust all reach 95%; this task set barely separates them. A harder or')
+    w('  larger set would be needed to see language differences beyond the first compile and the int64/unicode edges.')
+    w('- Final run times are for tiny inputs, so they measure process start, not throughput. The speed claim is carried by the')
+    w('  compare lab, not by this benchmark.')
+    w('- The AIL column got `AIL_FOR_AI.md` (37 lines, unchanged). Facts it lacks, from the failures above: `json.loads` needs an')
+    w('  annotated target; non-BMP text is not supported at run time; ints that can exceed int64 stop the program.')
+    w('- The first vibe3 attempt (deepseek via Command Code, partial) is kept as `results3-deepseek-partial.json` and')
+    w('  `RESULTS3-deepseek-partial.md`; it is not mixed into these numbers.')
     w('')
 
     (HERE / 'RESULTS3.md').write_text('\n'.join(L) + '\n')

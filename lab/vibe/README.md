@@ -36,7 +36,9 @@ environment, as the runner sets it.
 
     python3 lab/vibe/run.py --langs python --seeds 3 --minutes 90
 
-Use `--cli opencode` for `opencode run`. `--effort` is passed to `cmd` as `--effort`.
+Use `--cli opencode` for `opencode run`, or `--cli claude` (or `VIBE_CLI=claude`) for the Claude Code CLI
+(`claude -p --tools ""`, one text-only turn; pass `--model claude-haiku-5-5`; run model calls with `--jobs 1`).
+vibe3 (RESULTS3.md) used the claude adapter; Go is found on PATH (user-local `~/opt/go/bin`). `--effort` is passed to `cmd` as `--effort`.
 `--jobs` is capped at 2, per the lab load rule.
 
 ## Numbers
