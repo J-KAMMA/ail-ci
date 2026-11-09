@@ -66,7 +66,7 @@ CASES = [
     ('generator', 'python',
      'def gen(n: int):\n    for i in range(n):\n        yield i\n\n\n'
      'def main() -> None:\n    for x in gen(3):\n        print(x)\n\n\nmain()\n',
-     '3:', ['yield: this language has no generators', 'out.append(x)']),
+     '3:', ['`yield` makes a generator, and this compiler has no generators', 'out.append(x)']),
     ('walrus', 'python',
      'def main() -> None:\n    xs = [1, 2, 3]\n    if (n := len(xs)) > 2:\n        print(n)\n\n\nmain()\n',
      '3:', ['the walrus operator', 'n = len(xs)']),
@@ -79,7 +79,7 @@ CASES = [
      '8:', ['a `match` statement', 'if` / `elif` / `else` chain', '__match_args__']),
     ('while_else', 'python',
      'def main() -> None:\n    i = 0\n    while i < 3:\n        i += 1\n    else:\n        print("done")\n\n\nmain()\n',
-     '3:', ['while-else is unsupported', 'a flag set before the loop']),
+     '3:', ['`while ... else:` is not supported', 'a flag set before the loop']),
     # a flat list of ints, floats or strs prints (test_ail_typed_blockers2); a list of bools does not
     ('print_a_list', 'python',
      'def main() -> None:\n    xs = [True, False]\n    print(xs)\n\n\nmain()\n',

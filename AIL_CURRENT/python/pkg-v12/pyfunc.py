@@ -13833,7 +13833,8 @@ _EXPR_SHAPE_REFUSALS = {
     'List': 'a list literal used where a single value is needed.\n'
             '  write instead: put it on a line of its own (`xs = [1, 2, 3]`, or `xs = [0] * n`), then '
             'use `xs`; build any other shape with `.append()` in a loop',
-    'Tuple': 'a tuple used where a single value is needed.\n'
+    'Tuple': 'a tuple used where a single value is needed; name the list and append each tuple '
+             '(`out: list[tuple[int, int]] = []`, `out.append((a, b))`).\n'
              '  write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`)',
     'Set': 'a set literal here.\n'
            '  write instead: `s = set()` and then `s.add(x)` in a loop',
@@ -13854,9 +13855,9 @@ _EXPR_SHAPE_REFUSALS = {
                  '  write instead: assign on a line of its own, `n = len(xs)`, then `if n > 2:`',
     'Await': 'await: this language has no coroutines or event loop.\n'
              '  write instead: an ordinary `def` called directly',
-    'Yield': 'yield: this language has no generators.\n'
+    'Yield': '`yield` makes a generator, and this compiler has no generators.\n'
              '  write instead: build a list with `out.append(x)` and `return out`',
-    'YieldFrom': 'yield from: this language has no generators.\n'
+    'YieldFrom': '`yield from` makes a generator, and this compiler has no generators.\n'
                  '  write instead: build a list with `out.append(x)` and `return out`',
     'FString': '',
 }
@@ -28602,7 +28603,8 @@ def _guard_compile_body(node, ctx, ind, plan):
 
 def _while(node, ctx, ind):
     if node.orelse:
-        raise Unsupported('while-else is unsupported.\n'
+        raise Unsupported('`while ... else:` is not supported; when the loop has no `break`, the '
+                          '`else` body always runs and can move after the loop.\n'
                           '  write instead: a flag set before the loop, `done = True` when the loop '
                           'ends normally, and `if done:` after it')
     matched = _match_stdin_while_int_loop(node, ctx)
@@ -39735,16 +39737,16 @@ def _explain_dict_of_containers(source, error):
                               % (name, argument, argument, name, name, argument, error.args[0]),) + error.args[1:]
                 error.source_line = node.lineno + source[:len(source) - len(source.lstrip())].count('\n')
                 return
-        if 'dict of containers' not in error.args[0]:
-            error.args = (('`%s` uses `%s` as a dict of containers -- its values are lists, '
-                           'sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed '
-                           'dict of int lists aside), so this is refused. Rewrite: keep the groups in a '
-                           'list of structs and map each key to its index with a `dict[str, int]`: '
-                           '`struct G { items: list[str]; }` `let idx: dict[str, int] = {};` '
-                           '`let groups: list[G] = [];` then `if k not in idx { idx[k] = len(groups); '
-                           'groups.append(G([])); } groups[idx[k]].items.append(w);` (or keep parallel '
-                           'lists indexed through the int dict). Original refusal: %s')
-                          % (text, name, error.args[0]),) + error.args[1:]
+        if 'is a dict whose values' not in error.args[0]:
+            error.args = (('`%s` is a dict whose values are lists, sets or dicts (used at `%s`); '
+                           'a typed dict holds int, float, str or bytes, not a container. Rewrite: '
+                           'keep the groups in a list of structs and map each key to its index with '
+                           'a `dict[str, int]`: `struct G { items: list[str]; }` '
+                           '`let idx: dict[str, int] = {};` `let groups: list[G] = [];` then '
+                           '`if k not in idx { idx[k] = len(groups); groups.append(G([])); } '
+                           'groups[idx[k]].items.append(w);` (or keep parallel lists indexed '
+                           'through the int dict). Original refusal: %s')
+                          % (name, text, error.args[0]),) + error.args[1:]
         if site_line is not None:              # the container use this message names
             error.source_line = site_line + source[:len(source) - len(source.lstrip())].count('\n')
         return

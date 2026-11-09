@@ -274,6 +274,56 @@ match CPython on both builds with `bash ~/tools/cmp.sh`; hybrid builds of them a
 each and match byte for byte. Added `test_ail_wedge3.py` (registered in `tests.d/`), which pins the
 artefact shape, the zero-native result, the compiler commit and the no-vendoring rule. Tests on the
 final commit: `test_ail_wedge3`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+## 2026-11-10 -- err4 continuation: verification of step 3 (job-err4-11100013)
+
+The earlier run finished the step-3 code and committed it; this run verified that state and ran the
+required modules again.  No compiler, runtime or test code changed -- a message rewrite that already
+matches `lab/err/messages_rewritten.json` byte for byte was left alone.
+
+Verification on this commit: `test_ail_agent_errors` 11 OK (550.9 s; every family's `--json`
+`message` equals the rewritten text, names the user's file/line, carries no `_ail_` and its
+`Replace:`/`With:` block builds and removes the message); `test_ail_safetynet` 5 OK;
+`test_ail_files` 18 OK (1 skipped); `test_ail_corpus_findings3` 2 OK;
+`test_ail_strict` 13 OK; `test_ail_refusal_messages` 3 OK (its pinned substrings -- the yield,
+while-else and dict-of-containers causes -- are still present in the rewritten texts).
+
+Probes in `/tmp/probes/` (the 15 triggers plus 12 boundary variants: empty and negative
+counts, values through an argument, a list item, an attribute, a dict value, a `break` inside
+while-else): the 13 step-3 families and all 12 variants print what CPython prints on both builds
+(`bash ~/tools/cmp.sh`).  `01_stdin_buffer` is the one mismatch: the fallback executable raises
+`AttributeError: '_AilStdinBuffer' object has no attribute 'readline'`; that is the step-2 AIL0101
+construct itself (the note tells the user to replace it), not a step-3 message change.
+
+`python3 tools/update_manifest.py --check` passes.
+
+## 2026-11-09 -- err4: the agent format in the machine diagnostic message (job-err4-11091432)
+
+Step 3 of `docs/design/AGENT_ERRORS.md`.  `AIL_CURRENT/ail_agent_errors.py` now renders every
+catalogued diagnostic's `message` in the agent format: `file:line:col: AIL01xx: <cause>`, then
+the literal `Replace:` text copied from the user's own source lines and the `With:` edit.  The
+13 families left by step 2 (01, 03-10, 12-15) match `lab/err/messages_rewritten.json` byte for
+byte on their triggers; 02 and 11 keep the step-2 wording and position, now with the same
+`Replace`/`With` shape.  The cause is built from the user's names (the str/number comparison,
+the dict receiver, the class comprehension, the int and bool keys of the mixed dict, the
+function and its return paths, the while-else loop, the nested annotation, the tuple arity and
+the list parameter), never `_ail_*`.  The human stderr note keeps its one-line
+`note: ... built on the general path ...` form so existing note consumers are unchanged; the
+`--json` `message` is the agent form and still carries `severity`, `file`, `line`, `col`,
+`cause` and `fix.replace_range`/`with`.
+
+`AIL_CURRENT/python/pkg-v12/strictmode.py` classifies the same families with the rewritten
+replacement text (while-else, tuple, class comprehension, list parameter, bytes/number return)
+when a refusal carries no hint of its own.  `AIL_CURRENT/test_ail_agent_errors.py` now asserts,
+for every trigger, that the message names the user's file and line, contains no `_ail_`, and
+carries a `Replace:`/`With:` block; for the 13 step-3 families it also asserts the exact
+rewritten text.  No program's output or exit status changed.
+
+Probes in `/tmp/probes/` (the 13 triggers plus the 02/11 shapes) all match CPython on the
+general and default builds with `bash ~/tools/cmp.sh`; the rewritten `With:` blocks build and
+remove their message in `test_ail_agent_errors`.
+
+Tests on the final commit, `-j 2`: `test_ail_agent_errors`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` and `test_ail_strict`.
 
 ## 2026-11-08 -- aiknow1: agent-facing AIL material (job-aiknow1-11081958)
 

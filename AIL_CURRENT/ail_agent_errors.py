@@ -23,7 +23,7 @@ FAMILIES = (
          **{'with': 'if s == "1":'}),
     dict(code='AIL0104', pattern='d.get(k) with one argument', cause='`dict.get(k)` gives None for a missing key, and this compiler has no None for an int value.', replace='v = d.get(k)',
          **{'with': 'v = d.get(k, -1)'}),
-    dict(code='AIL0105', pattern='dict of containers', cause='this dict holds a list as a value; a typed dict holds int, float, str or bytes, not a list.', replace='accounts[rid] = [name, initial, True]\nprint(accounts[rid][0], accounts[rid][1])',
+    dict(code='AIL0105', pattern='is a dict whose values', cause='this dict holds a list as a value; a typed dict holds int, float, str or bytes, not a list.', replace='accounts[rid] = [name, initial, True]\nprint(accounts[rid][0], accounts[rid][1])',
          **{'with': 'class Account:\n    def __init__(self, name: str, initial: int, active: bool) -> None:\n        self.name = name\n        self.initial = initial\n        self.active = active\n\naccounts: dict[int, Account] = {}\naccounts[rid] = Account(name, initial, True)\nprint(accounts[rid].name, accounts[rid].initial)'}),
     dict(code='AIL0106', pattern='class list comprehensions', cause='this list comprehension builds class instances; this compiler builds comprehensions of numbers, strings and bytes only.', replace='    return [P(x) for x in xs]',
          **{'with': '    out: list[P] = []\n    for x in xs:\n        out.append(P(x))\n    return out'}),
@@ -31,7 +31,7 @@ FAMILIES = (
          **{'with': "class Node:\n    def __init__(self, kind: str, line: int, has_else: bool) -> None:\n        self.kind = kind\n        self.line = line\n        self.has_else = has_else\n\nd = Node('when', 3, False)\nprint(d.line, d.has_else)"}),
     dict(code='AIL0108', pattern='returns bytes on one path and a number', cause='this function returns `bytes` on one path and a number on the other; one function has one return type.', replace='    return 0',
          **{'with': '    return b"0"'}),
-    dict(code='AIL0109', pattern='while-else is unsupported', cause='`while ... else:` is not supported; when the loop has no `break`, the `else` body always runs and can move after the loop.', replace='while i < 3:\n    i += 1\nelse:\n    print("done", i)',
+    dict(code='AIL0109', pattern='while ... else:` is not supported', cause='`while ... else:` is not supported; here the loop has no `break`, so the `else` body always runs and can move after the loop.', replace='while i < 3:\n    i += 1\nelse:\n    print("done", i)',
          **{'with': 'while i < 3:\n    i += 1\nprint("done", i)'}),
     dict(code='AIL0110', pattern='nested annotation', cause='this annotation is two levels deep (a list of dicts); the typed path recognises one level of rows, `list[SomeClass]`.', replace='def sizes(records: list[dict[str, str]]) -> list[int]:\n    out = []\n    for r in records:\n        out.append(len(r))\n    return out\n\nprint(sizes([{"a": "1"}, {"b": "2", "c": "3"}]))',
          **{'with': 'class Row:\n    def __init__(self, a: str, b: str) -> None:\n        self.a = a\n        self.b = b\n\ndef sizes(records: list[Row]) -> list[int]:\n    out: list[int] = []\n    for r in records:\n        n = 1\n        if r.b:\n            n = 2\n        out.append(n)\n    return out\n\nprint(sizes([Row("1", ""), Row("2", "3")]))'}),
@@ -39,9 +39,9 @@ FAMILIES = (
          **{'with': 'print(1 / 2)'}),
     dict(code='AIL0112', pattern='format spec on a Decimal', cause='a format spec on a `Decimal` needs `Decimal.__format__`; this compiler applies format specs to int, float and str only. The old position was inside the `decimal` prelude rather than your file.', replace='print(f"{d:.2f}")',
          **{'with': 'print(f"{float(d):.2f}")'}),
-    dict(code='AIL0113', pattern='yield: this language has no generators', cause='`yield` makes a generator, and this compiler has no generators.', replace='def gen(n: int):\n    for i in range(n):\n        yield i',
+    dict(code='AIL0113', pattern='makes a generator, and this compiler has no generators', cause='`yield` makes a generator, and this compiler has no generators.', replace='def gen(n: int):\n    for i in range(n):\n        yield i',
          **{'with': 'def gen(n: int) -> list[int]:\n    out: list[int] = []\n    for i in range(n):\n        out.append(i)\n    return out'}),
-    dict(code='AIL0114', pattern='a tuple used where a single value is needed', cause='this comprehension builds a list of tuples in one expression; this compiler needs the list named, then the tuples appended to it.', replace='    return [(m, pow(base, -1, m)) for m in moduli]',
+    dict(code='AIL0114', pattern='a tuple used where a single value is needed', cause='the comprehension builds a list of tuples in one expression; this compiler needs the list named, then pairs appended to it.', replace='    return [(m, pow(base, -1, m)) for m in moduli]',
          **{'with': '    out: list[tuple[int, int]] = []\n    for m in moduli:\n        out.append((m, pow(base, -1, m)))\n    return out'}),
     dict(code='AIL0115', pattern='is a list parameter, which is read-only', cause="this is a `list` parameter, and parameters are read-only, so assigning an element cannot change the caller's list.", replace='def fill(arr: list[int]) -> None:\n    arr[0] = 1\n\nxs = [0, 0]\nfill(xs)',
          **{'with': 'def fill(arr: list[int]) -> list[int]:\n    out: list[int] = []\n    for x in arr:\n        out.append(x)\n    out[0] = 1\n    return out\n\nxs = [0, 0]\nxs = fill(xs)'}),
@@ -394,8 +394,9 @@ def _loc_str_number(text, lines, tree, item):
     other = _segment(text, chosen[0][2]) or 'this value'
     number = _segment(text, chosen[0][1]) or '1'
     always = 'True' if isinstance(chosen[0][3], ast.NotEq) else 'False'
-    cause = ('`%s` is a str and `%s` is a number; a str is never equal to a number, so this '
-             'comparison is always %s.' % (other, number, always))
+    comparison = _segment(text, chosen[0][0]) or 'this comparison'
+    cause = ('`%s` is a str and `%s` is a number; a str is never equal to a number, so `%s` is '
+             'always %s.' % (other, number, comparison, always))
     # A str is never equal to a number, so the comparison's value is the constant `False` (`Eq`) or
     # `True` (`NotEq`) whatever the str holds.  Two edits keep that exactly: write the number as a
     # string when the str provably differs from that text (the design's edit), and otherwise replace
@@ -552,14 +553,15 @@ def _loc_class_comprehension(text, lines, tree, item):
                         force_position=True)
         iterator = _segment(text, generator.iter) or 'values'
         element_text = _segment(text, element) or '%s(x)' % class_name
+        comprehension_text = _segment(text, node.value) or '[%s for ...]' % element_text
         indent = ' ' * node.col_offset
         with_text = '\n'.join((
             indent + 'out: list[%s] = []' % class_name,
             indent + 'for %s in %s:' % (generator.target.id, iterator),
             indent + '    out.append(%s)' % element_text,
             indent + 'return out'))
-        cause = ('`%s` is a list comprehension that builds `%s` instances; this compiler builds '
-                 'comprehensions of numbers, strings and bytes only.' % (element_text, class_name))
+        cause = ('`%s` is a list comprehension that builds class instances; this compiler builds '
+                 'comprehensions of numbers, strings and bytes only.' % comprehension_text)
         return _fix(node.lineno, node.end_lineno, with_text, line=node.lineno,
                     col=node.col_offset + 1, cause=cause)
     return None
@@ -579,9 +581,33 @@ def _loc_bool_number(text, lines, tree, item):
                 elif isinstance(value.value, (int, float, complex)):
                     kinds.add('number')
         if kinds == {'bool', 'number'}:
-            return dict(line=node.lineno, col=node.col_offset + 1, fix=None,
-                        cause='this dict literal mixes bools and numbers; an AIL dict has one value '
-                              'type. Writing `0` / `1` would change what prints.', force_position=True)
+            number_item = bool_item = None
+            for key, value in zip(node.keys, node.values):
+                if not isinstance(value, ast.Constant):
+                    continue
+                if isinstance(value.value, bool) and bool_item is None:
+                    bool_item = (key, value)
+                elif isinstance(value.value, (int, float, complex)) and number_item is None:
+                    number_item = (key, value)
+
+            def described(entry):
+                key, value = entry
+                key_text = _segment(text, key) if key is not None else None
+                value_text = _segment(text, value) or '...'
+                return '`%s: %s`' % (key_text, value_text) if key_text else '`%s`' % value_text
+
+            statement = _statement(node, _parents(tree))
+            line = statement.lineno if statement is not None else node.lineno
+            col = (statement.col_offset if statement is not None else node.col_offset) + 1
+            if number_item is not None and bool_item is not None:
+                cause = ('this dict literal puts an int (%s) and a bool (%s) in the same dict; an '
+                         'AIL dict has one value type. Writing `0` / `1` to match the int would '
+                         'change what prints (`0` instead of `False`).'
+                         % (described(number_item), described(bool_item)))
+            else:
+                cause = ('this dict literal mixes bools and numbers; an AIL dict has one value '
+                         'type. Writing `0` / `1` would change what prints.')
+            return dict(line=line, col=col, fix=None, cause=cause, force_position=True)
     return None
 
 
@@ -626,11 +652,33 @@ def _loc_bytes_return(text, lines, tree, item):
         chosen = number_returns[0]
         value = chosen.value.value
         indent = ' ' * chosen.col_offset
-        cause = ('`%s` returns `bytes` on one path and the number `%s` on another; one function has '
-                 'one return type.' % (node.name, value))
+        ordered = sorted(returns, key=lambda inner: (inner.lineno, inner.col_offset))
+        words = ('first', 'second', 'third', 'fourth')
+        bytes_place = words[ordered.index(bytes_returns[0])] if bytes_returns[0] in ordered else 'first'
+        number_place = words[ordered.index(chosen)] if chosen in ordered else 'another'
+        number_on = ('the ' + number_place) if number_place != 'another' else 'another path'
+        cause = ('`%s` returns `bytes` on the %s path and the number `%s` on %s; one '
+                 'function has one return type.' % (node.name, bytes_place, value, number_on))
         return _fix(chosen.lineno, chosen.end_lineno, indent + 'return b"%s"' % value,
                     line=chosen.lineno, col=chosen.col_offset + 1, cause=cause, force_position=True)
     return None
+
+
+def _has_own_break(node):
+    """True when `node` (a loop) can be left by a `break` belonging to it.
+
+    A `break` inside a nested loop or a nested function leaves that construct, not this loop, so
+    the search stops at those.  The `else` suite cannot hold a `break` (Python rejects it)."""
+    stack = list(ast.iter_child_nodes(node))
+    while stack:
+        current = stack.pop()
+        if isinstance(current, ast.Break):
+            return True
+        if isinstance(current, (ast.While, ast.For, ast.AsyncFor, ast.FunctionDef,
+                                ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        stack.extend(ast.iter_child_nodes(current))
+    return False
 
 
 def _loc_while_else(text, lines, tree, item):
@@ -639,8 +687,14 @@ def _loc_while_else(text, lines, tree, item):
     for node in ast.walk(tree):
         if not isinstance(node, ast.While) or not node.orelse:
             continue
-        if any(isinstance(inner, ast.Break) for inner in ast.walk(node)):
-            continue
+        if _has_own_break(node):
+            # The table's cause ("the loop has no `break`, so the `else` body always runs") is
+            # false here, and moving the `else` body after the loop would change what prints.
+            cause = ('`while ... else:` is not supported; here the loop has a `break`, so the '
+                     '`else` body runs only when the loop ends without one. Set a flag before the '
+                     'loop, clear it before each `break`, and test it after the loop.')
+            return dict(line=node.lineno, col=node.col_offset + 1, fix=None, cause=cause,
+                        force_position=True, no_fallback=True)
         end_body = node.body[-1].end_lineno if node.body else node.lineno
         base = _indent(lines[node.lineno - 1]) if node.lineno <= len(lines) else 0
         block = list(lines[node.lineno - 1:end_body])
@@ -672,10 +726,20 @@ def _loc_nested_annotation(text, lines, tree, item):
                          + list(node.args.kwonlyargs))
             for argument in arguments:
                 if _nested_annotation(argument.annotation):
-                    return dict(line=node.lineno, col=node.col_offset + 1, fix=None, cause=None,
+                    annotation = _segment(text, argument.annotation) or 'this annotation'
+                    inner = 'dicts' if 'dict' in annotation else 'lists'
+                    written = _segment(text, argument) or argument.arg
+                    cause = ('`%s` is two levels deep (a list of %s); the typed path recognises '
+                             'one level of rows, `list[SomeClass]`.' % (written, inner))
+                    return dict(line=node.lineno, col=node.col_offset + 1, fix=None, cause=cause,
                                 force_position=True)
         if isinstance(node, ast.AnnAssign) and _nested_annotation(node.annotation):
-            return dict(line=node.lineno, col=node.col_offset + 1, fix=None, cause=None,
+            annotation = _segment(text, node.annotation) or 'this annotation'
+            inner = 'dicts' if 'dict' in annotation else 'lists'
+            target = _segment(text, node.target) or 'this name'
+            cause = ('`%s: %s` is two levels deep (a list of %s); the typed path recognises '
+                     'one level of rows, `list[SomeClass]`.' % (target, annotation, inner))
+            return dict(line=node.lineno, col=node.col_offset + 1, fix=None, cause=cause,
                         force_position=True)
     return None
 
@@ -814,10 +878,10 @@ def _loc_decimal(text, lines, tree, item):
             (node.value.end_col_offset, node.value.end_col_offset, ')')]}
         with_text = _apply(lines, statement.lineno, statement.end_lineno, edits)
         cause = ('a format spec on a `Decimal` needs `Decimal.__format__`; this compiler applies '
-                 'format specs to int, float and str only. The old position was inside the `decimal` '
-                 'prelude rather than your file.')
-        return _fix(statement.lineno, statement.end_lineno, with_text, line=node.value.lineno,
-                    col=node.value.col_offset + 1, cause=cause, force_position=True)
+                 'format specs to int, float and str only. The old note pointed at line 1687 of the '
+                 '`decimal` prelude, not at your %d-line file.' % len(lines))
+        return _fix(statement.lineno, statement.end_lineno, with_text, line=statement.lineno,
+                    col=statement.col_offset + 1, cause=cause, force_position=True)
     if first_value is not None:
         # a format spec in a program that imported `decimal`, but this value is not Decimal-derived
         return dict(line=first_value.lineno, col=first_value.col_offset + 1, fix=None, cause=None,
@@ -902,8 +966,9 @@ def _loc_tuple(text, lines, tree, item):
             indent + 'for %s in %s:' % (generator.target.id, iterator),
             indent + '    out.append(%s)' % element_text,
             indent + 'return out'))
-        cause = ('this comprehension builds a list of tuples in one expression; this compiler needs '
-                 'the list named, then the tuples appended to it.')
+        arity = len(comprehension.elt.elts)
+        cause = ('the comprehension builds a list of %d-field tuples in one expression; this compiler '
+                 'needs the list named, then pairs appended to it.' % arity)
         return _fix(node.lineno, node.end_lineno, with_text, line=node.lineno,
                     col=node.col_offset + 1, cause=cause, force_position=True)
     return None
@@ -915,7 +980,8 @@ def _loc_list_parameter(text, lines, tree, item):
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        parameters = {argument.arg for argument in
+        parameters = {argument.arg: (_segment(text, argument.annotation) or 'list')
+                      for argument in
                       list(node.args.args) + list(node.args.posonlyargs) + list(node.args.kwonlyargs)
                       if isinstance(argument.annotation, ast.Subscript)}
         for inner in ast.walk(node):
@@ -924,8 +990,12 @@ def _loc_list_parameter(text, lines, tree, item):
             for target in inner.targets:
                 if (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
                         and target.value.id in parameters):
-                    return dict(line=inner.lineno, col=inner.col_offset + 1, fix=None, cause=None,
-                                force_position=True)
+                    written = _segment(text, inner) or ('%s[...] = ...' % target.value.id)
+                    cause = ('`%s` is a `%s` parameter and parameters are read-only, so `%s` '
+                             "cannot change the caller's list."
+                             % (target.value.id, parameters[target.value.id], written))
+                    return dict(line=inner.lineno, col=inner.col_offset + 1, fix=None,
+                                cause=cause, force_position=True)
     return None
 
 
@@ -937,7 +1007,11 @@ def _loc_container_dict(text, lines, tree, item):
             continue
         for target in node.targets:
             if isinstance(target, ast.Subscript) and isinstance(node.value, (ast.List, ast.Set, ast.Dict)):
-                return dict(line=node.lineno, col=node.col_offset + 1, fix=None, cause=None,
+                kind = {ast.List: 'list', ast.Set: 'set', ast.Dict: 'dict'}[type(node.value)]
+                name = target.value.id if isinstance(target.value, ast.Name) else 'this name'
+                cause = ('`%s` is a dict whose values are %ss; a typed dict holds int, float, '
+                         'str or bytes, not a %s.' % (name, kind, kind))
+                return dict(line=node.lineno, col=node.col_offset + 1, fix=None, cause=cause,
                             force_position=True)
     return None
 
@@ -1067,6 +1141,24 @@ def _locate(item, source_text, lines):
 # ------------------------------------------------------------------------------ public objects
 
 
+def _agent_message(item, path, line, col, cause, fix, source_text):
+    """The agent format: `file:line:col: CODE: cause`, then the literal `Replace:`/`With:` edit.
+
+    The replacement is copied from the user's own source lines, so an agent can apply it without
+    parsing the message.  None when the diagnostic has no position to name."""
+    if path is None or line is None or col is None:
+        return None
+    head = '%s:%s:%s: %s: %s' % (path, line, col, item['code'], cause)
+    if fix is None or source_text is None:
+        return head
+    lines = _lines(source_text)
+    first, last = fix['replace_range']
+    if not (1 <= first <= last <= len(lines)):
+        return head
+    replaced = '\n'.join(lines[first - 1:last])
+    return '%s\nReplace:\n%s\nWith:\n%s' % (head, replaced, fix['with'])
+
+
 def diagnostic(message, source_text=None, path=None, line=None, col=None, severity=None):
     """The JSON-ready object for one diagnostic, or None when the message is not in the table.
 
@@ -1113,8 +1205,9 @@ def diagnostic(message, source_text=None, path=None, line=None, col=None, severi
 
     if severity is None:
         severity = 'error' if text.startswith('error:') or 'not in the subset:' in text else 'note'
+    shown = _agent_message(item, path, line, col, cause, fix, source_text)
     result = dict(code=item['code'], severity=severity, file=None if path is None else str(path),
-                  line=line, col=col, cause=cause, message=text)
+                  line=line, col=col, cause=cause, message=shown or text)
     if fix is not None:
         result['fix'] = fix
     return result
@@ -1129,11 +1222,11 @@ def _refusal_position(text, source_text):
     head = re.sub(r'^not in the subset:\s*', '', head)
     patterns = ((r'^async def\b', r'\basync\s+def\b'),
                 (r'^await\b', r'\bawait\b'),
-                (r'^yield\b', r'\byield\b'),
+                (r'^`?yield', r'\byield\b'),
                 (r'^(?:class|inheritance)', r'^\s*class\s+\w+'),
                 (r'^a decorator', r'^\s*@'),
                 (r'^(?:lambda|a lambda)', r'\blambda\b'),
-                (r'^while.{0,10}else', r'^\s*while\b'),
+                (r'^`?while.{0,10}else', r'^\s*while\b'),
                 (r'^with\b', r'^\s*with\b'),
                 (r'^try\b', r'^\s*try\b'),
                 (r'^raise\b', r'\braise\b'),

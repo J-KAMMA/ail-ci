@@ -346,7 +346,7 @@ class ShortStyleTrapTests(unittest.TestCase):
                 output = built.stdout + built.stderr
                 self.assertNotEqual(built.returncode, 0)
                 self.assertFalse(exe.exists())
-                self.assertIn('dict of containers', output)
+                self.assertIn('is a dict whose values', output)
                 self.assertIn('dict[str, int]', output)
                 self.assertNotIn('C compiler rejected', output)
                 self.assertNotIn('pf_main', output)
