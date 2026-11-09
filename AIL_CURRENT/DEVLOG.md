@@ -55,6 +55,28 @@ match CPython on the default build; every general-path build is refused by name.
 Tests on the final commit, `-j 2`: `test_ail_par_reduce_rt`, `test_ail_par_sched`,
 `test_ail_par_reduce`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3`.
+## 2026-11-09 -- aicomp1: where AIL stands on AI compute today (measurement only) (job-aicomp1-11091640)
+
+Adds `lab/aicomp/` only; no compiler, runtime or test module changed. `bench.py` generates one
+algorithm per case in AIL (typed, `--strict`), NumPy 2.5.4 (OpenBLAS 0.3.34), PyTorch 2.5.1+cpu,
+plain C (`gcc -O2 -ffp-contract=off`) and CPython (f64, smallest rows), all single-threaded, and
+records the median of 5 process walls, child CPU seconds and peak RSS in `results.json`/`RESULTS.md`.
+16 cases: matmul 256/1024/2048 f64 and f32, elementwise `a*b+c`/relu over 10M, sum over 10M,
+row softmax over 1024x1024, MLP 64-784-512-10, and the attention core of a transformer block
+(seq 128, dim 64).
+
+Headline numbers: AIL is the fastest column on elementwise f64 (152 ms, 1.00x) and sum f64
+(34.5 ms, 1.00x), and within 1.2-2.8x of the best on most small/medium cases. Its three largest
+gaps are matmul 2048 f64 (5354 ms, 11.1x NumPy's 482 ms), softmax 1024 f32 (114.5 ms, 9.6x C's
+11.9 ms) and matmul 1024 f64 (690 ms, 5.1x NumPy's 134 ms). The f32 path pays for the per-op
+round-to-f32 helper (elementwise f32 323 ms vs C 115 ms). AIL's f64 outputs agree with NumPy to
+<=8.7e-16 relative on these checks; over all columns f64 is <=1.4e-10 and f32 <=3.2e-6 (both
+worst on the C sum, whose reduction order differs from NumPy's), while AIL's own f32 is
+<=5.6e-7 (mlp) and <=3.8e-7 on matmul. The full
+transformer block is not expressible: layer norm, 2-D reductions, row broadcast and a fused
+softmax are missing; the attention core is written with manual row loops. No Vulkan device on
+the runner (loader present, no ICD), and the GPU path covers marked loops only, not `ta.matmul`.
+12 small probes (`lab/aicomp/probes.py`) match CPython on both the default and unified builds.
 
 ## 2026-11-08 -- fz244: keyed list.sort over int64 boundaries already matches CPython (job-fz244-11090611)
 
