@@ -100,6 +100,10 @@ source or compiler change.
 There is no workload output mismatch to report as a bug.  `build.json` refused every hot-module
 function by name; the top reasons are in section 3.
 
+The three required AIL regression modules were run on the committed tree (no AIL module changed):
+`test_ail_safetynet` 5 passed, `test_ail_files` 18 passed / 1 skipped, `test_ail_corpus_findings3`
+2 passed.  No AIL test module was added because this job added no AIL module.
+
 ## 5. Limits
 
 * Instruction counts are missing: `tools/icount.c` builds, but `perf_event_open` is denied on this
