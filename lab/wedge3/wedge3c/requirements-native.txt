@@ -1,0 +1,2 @@
+# Native jellyfish baseline (Rust extension).  Install in its own venv.
+jellyfish==1.1.0

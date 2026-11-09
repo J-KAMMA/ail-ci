@@ -1,0 +1,5 @@
+# Pure-Python / CPython / PyPy venv.  These are installed, never vendored.
+jellyfish==0.8.9
+msgpack==1.0.7
+# The native jellyfish baseline is a separate venv because 1.x and 0.8.9 share a package
+# name: see requirements-native.txt.
