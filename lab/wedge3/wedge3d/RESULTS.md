@@ -17,7 +17,7 @@ the native rewrites ran 7.5x and 8.1x faster.**
 
 | library | pure Python path | native path | workload | output checked |
 | --- | --- | --- | --- | --- |
-| python-dateutil 2.9.0.post0 | `dateutil.parser.parse` | `ciso8601.parse_datetime` | 50,000 ISO/RFC-3339 date strings (date-only, naive, `Z`, ±14:00 offsets, microseconds); canonical UTC/naive ISO digest | count, FNV-1a digest, first, last |
+| python-dateutil 2.9.0.post0 | `dateutil.parser.parse` | `ciso8601.parse_datetime` | 50,000 ISO/RFC-3339 date strings (date-only, naive, `Z`, offsets `-11:57` to `+11:56`, microseconds); canonical UTC/naive ISO digest | count, FNV-1a digest, first, last |
 | ahocorapy 1.8.0 | `KeywordTree.search_all` | `ahocorasick_rs.AhoCorasick.find_matches_as_indexes(overlapping=True)` | 500 patterns over a 19.2 MB text built to hit ahocorapy's per-character loop; matches canonicalised to `(start, pattern)` and hashed | pattern/text/match counts, FNV-1a digest, first, last |
 
 Both drivers are in `workloads/`; `W3D_IMPL=python|native` selects the implementation and the

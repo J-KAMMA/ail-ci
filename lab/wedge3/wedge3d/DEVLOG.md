@@ -1,3 +1,11 @@
+## 2026-11-09 -- wedge3d: correct workload offset range in RESULTS.md (job-wedge3d-11091327)
+
+Review fix only; no measurement changed.
+- `RESULTS.md` section 1 claimed the date workload contained `±14:00` offsets.  `make_strings` uses
+  `off = (i*37) % 1440 - 720` over the sampled indices, so the actual range is `-11:57 .. +11:56`
+  (probe: 12,500 offset strings, no `±14:00`).  The sentence now states that range.  `±14:00`
+  remains only in the edge probe, where it is real.
+
 ## 2026-11-09 -- wedge3d: fix review defects (job-wedge3d-11091228)
 
 Review fixes only; new timings and corrected counts are in `results.json` and `RESULTS.md`.
