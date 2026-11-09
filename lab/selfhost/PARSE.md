@@ -84,3 +84,114 @@ The reference's own top refused constructs (not parser refusals) are:
 `AIL_CURRENT/tests.d/test_ail_selfhost_parse.txt`) checks 200 fixed S376 expressions at stage 1, the
 edge expressions at stage 1, the `...` and named-refusal behaviour, and stage 2 against stage 1 on 20
 fixed S376 expressions plus the edge expressions.  It passes in about 59 s including the build.
+
+# shparse2: whole modules and statements
+
+Measured 2026-11-09 on branch `job-shparse2-11091432` (base `origin/integ` after shparse1), GitHub
+Actions runner, CPython 3.12.3.  `selfhost/src/ailparse.py` now has `parse(src) -> Module`; it still
+imports only `ailtok` and `ailast`.  `selfhost/drv/parse_drv.py` is the stage 1 / stage 2 driver and
+`selfhost/ref/parse_ref.py` is the CPython stage 0 reference (`ast.parse` + `ast.dump` with
+attributes off).  Both accept a `CORPUS.txt` list (sha256 lines included).
+
+## Stage 1 result
+
+    python3 tools/selfhost_diff.py --ref "python3 selfhost/ref/parse_ref.py" \
+        --cand "python3 selfhost/drv/parse_drv.py" --list selfhost/CORPUS.txt --jobs 2
+
+| count | value |
+|---|---:|
+| S376 files | 376 |
+| identical (`ailast.dump(ailparse.parse(src))` == `ast.dump(ast.parse(src))`) | **376 (100%)** |
+| different | **0** |
+| refused by `ailparse` | **0** |
+| reference seconds / candidate seconds | 2.45 / 8.24 |
+
+The compiler-file part (156 files, 205k lines) is included in the 376.  Attributes are off in this
+stage; positions are filled but not compared.  The parser covers expression statements, assignment
+chains with tuple/list/star/attribute/subscript targets, augmented and annotated assignment
+(`simple` flag), `return`, `raise ... from`, `assert`, `del`, `pass`, `break`, `continue`, `global`,
+`nonlocal`, both import forms (dotted, `as`, `*`, parenthesized names), `if`/`elif`/`else`,
+`for`/`while` with `else`, `try`/`except`/`else`/`finally`, `with` (several items and parenthesized
+items), `def`/`async def` with decorators, positional-only, keyword-only, defaults, `*args`, `**kw`,
+annotations and return annotations, `class` with bases/keywords/decorators, `lambda` defaults, and
+`yield`/`yield from`.  Docstrings are ordinary `Expr(Constant(...))` nodes.
+
+## S376 construct counts
+
+Counts from `ast` over the 376 files; a construct with no occurrence is refused by name.
+
+| construct | count | construct | count |
+|---|---:|---|---:|
+| `Assign` / multi-target | 38318 / 106 | `FunctionDef` | 8437 |
+| decorated `def` | 88 | `ClassDef` / with bases / decorated | 447 / 251 / 13 |
+| `Return` / bare | 18324 / 716 | `arg` / annotated | 19042 / 886 |
+| defaults / keyword-only / `*args` / `**kw` / positional-only | 584 / 47 / 65 / 24 / 1 |
+| `Raise` / bare / `from` | 3706 / 53 / 30 | `Assert` / with message | 11 / 5 |
+| `Delete` | 69 | `Global` / `Nonlocal` | 46 / 8 |
+| `Import` / `ImportFrom` | 991 / 258 | `alias` | 1481 |
+| `If` / `For` / `While` | 29206 / 5896 / 787 | `For` else / `While` else | 10 / 1 |
+| `Try` / handlers / `else` / `finally` | 744 / 629 / 3 / 156 | named handler / multi-handler | 135 / 25 |
+| `With` / multi-item / bound `as` | 63 / 1 / 63 | `Yield` / `YieldFrom` | 106 / 35 |
+| `AnnAssign` / without value / `simple=0` | 342 / 24 / 9 | `AugAssign` | 2171 |
+| `NamedExpr` | 5 | `Constant` / bytes / ellipsis | 100502 / 137 / 1 |
+
+Constructs with **zero** S376 occurrences are refused by name rather than built: a `match`/`case`
+statement (`ailparse: match statement not supported`), a 3.12 `type X = ...` alias
+(`ailparse: type alias not supported`), and generic `def f[T]`/`class C[T]` type parameters
+(`ailparse: type parameters not supported`).  The `match` and `type` tests look at the following
+tokens, so `match = 1`, `match(x)`, `match: int = 1`, `type = 5` and `type(x)` stay ordinary
+statements.  `async def`, `async for`, `async with`, `await` and `except*` are implemented with local
+node classes in `ailparse.py` (`ailast.py` has no such classes), but none occurs in S376, so they are
+not counted as moving the number.
+
+## Errors
+
+`parse` raises `SyntaxError` where `ast.parse` does.  A simple line now requires a real terminator
+(`NEWLINE`, `;`, or end of input), so `x y`, `1 2`, `print() print()` and `x = 1 y = 2` are refused;
+an annotated target must be a name, attribute or subscript (`a, b: int = 1, 2` is refused); an
+augmented target may not be a tuple/list; `from . import ()` is refused; and `except` may not be
+mixed with `except*` in one `try`.  Parentheses now decide the `AnnAssign.simple` flag, so
+`(x): int = 1` has `simple=0` while `x: int = 1` has `simple=1`.
+
+`AIL_CURRENT/test_ail_selfhost_parse.py` has 20 fixed snippets (5 legal, 15 rejected) and checks only
+error versus no error; the message text differs and is not compared.  Result: **20/20 agree**.  A
+second set of reviewer boundary cases (13 legal, 8 rejected, 5 named refusals) is checked the same
+way.  `return` and `yield` at module level are not errors for `ast.parse` and are accepted here as
+well.
+
+## Stage 2
+
+`selfhost/drv/parse_drv.py` now builds (general path, as the `ailast` class attributes still force
+it).  Against stage 1 it prints byte-identical output for **373/376** files with the default int64
+build.  The three remaining files contain integer literals above int64
+(`AIL_CURRENT/python/pkg-v12/pyboxed.py`, `pyboxed2.py`, and
+`lab/compare/src/chain_relax/main.py`); AIL stops loudly there, which is the allowed behaviour when
+the value cannot be computed.  Compiling the same driver with `--exact-int` makes stage 2 print
+**376/376** identical.
+
+The driver catches `Exception` rather than `SyntaxError`, because AIL's subset cannot catch the
+builtin `SyntaxError` type.  `ailparse.parse` still raises `SyntaxError` on CPython: the raising
+helper is redefined in a block AIL's checker ignores, while AIL compiles a no-op placeholder that a
+valid input never reaches.
+
+## Test
+
+The existing stage 1 expression tests still pass, and the test module now also parses 30 fixed S376
+files and compares the dump with `ast.parse`, plus the 20 snippets and the boundary cases.  It also
+builds `parse_drv.py` and checks the 30 files at stage 2 against stage 1.  All 9 tests pass.
+
+## Non-ASCII identifiers (refused by name)
+
+CPython accepts a Unicode identifier and NFKC-normalises it, so `café` and `cafe\u0301` name the
+same variable and `Ⅷ` becomes `VIII`.  AIL does not build `unicodedata.normalize`, so reproducing
+that is out of reach here.  `ailparse` therefore raises `ailparse: non-ASCII identifiers are not
+supported` at the first non-ASCII character in a NAME token instead of silently keeping the raw
+spelling.  That also refuses a BOM, a zero-width space, and other non-printable characters where
+`ast.parse` rejects them, rather than lexing them as names.  The refusal is in `ailparse`, not
+`ailtok`: `ailtok.tokenize` must keep matching CPython's `tokenize`, which reports the raw
+spelling of `café`, on valid source.  `tokenize` over the 376 S376 files finds **0** non-ASCII NAME
+tokens, so the number is unaffected; comments and string literals (where non-ASCII text does
+occur) are skipped by the tokenizer and still parse identically.  The test's boundary lists cover
+`\ufeff`, `x\u200b`, an emoji, `café` and `Ⅷ`.  A stage 2 build refuses with the same message: the
+AIL-side `_parse_syntax_error` placeholder raises `ParseError`, so the driver prints the same
+`!! refused: ailparse: ...` line as stage 1 instead of dumping a bare `None`.
