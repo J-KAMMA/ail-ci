@@ -322,10 +322,29 @@ def _merge_constants(values):
     return out
 
 
+def _has_non_ascii(s):
+    k = 0
+    while k < len(s):
+        if ord(s[k]) >= 128:
+            return True
+        k += 1
+    return False
+
+
 class Parser:
     def __init__(self, text, stmt_mode=False):
         self.text = text
         self.toks = ailtok.tokenize(text)
+        for t in self.toks:
+            if t.type == 'NAME' and _has_non_ascii(t.string):
+                # CPython accepts a Unicode identifier and NFKC-normalises it, so a precomposed
+                # spelling and a decomposed one name the same variable, and a Roman numeral
+                # compatibility character becomes ASCII letters.  AIL does not build
+                # `unicodedata.normalize`, so this cannot be made exact; refuse by name rather
+                # than silently keep the un-normalised spelling.  No S376 file has a non-ASCII
+                # NAME token (checked with `tokenize` over CORPUS.txt).  The tokenizer itself
+                # still matches CPython's `tokenize`, which reports the raw spelling.
+                raise ParseError('ailparse: non-ASCII identifiers are not supported')
         self.i = 0
         self.prev = self.toks[0]
         self.starts = [0]
@@ -2123,8 +2142,10 @@ def parse_expr(text):
 def _parse_syntax_error(message):
     # AIL's subset cannot raise SyntaxError.  Its checker ignores the redefinition below, while
     # CPython runs it, so ``parse`` raises SyntaxError exactly where ``ast.parse`` does on CPython
-    # and the AIL build only reaches the placeholder on a path a valid input never takes.
-    pass
+    # and the AIL build only reaches this placeholder on a path a valid input never takes.
+    # Raising ParseError here (instead of returning None) keeps a stage 2 refusal's message
+    # identical to stage 1's rather than making the driver dump a bare ``None``.
+    raise ParseError(message)
 
 
 if True:
