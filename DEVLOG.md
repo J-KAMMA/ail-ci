@@ -80,6 +80,58 @@ transformer block is not expressible: layer norm, 2-D reductions, row broadcast 
 softmax are missing; the attention core is written with manual row loops. No Vulkan device on
 the runner (loader present, no ICD), and the GPU path covers marked loops only, not `ta.matmul`.
 12 small probes (`lab/aicomp/probes.py`) match CPython on both the default and unified builds.
+## 2026-11-09 -- dog1: gate-statistics tool written in AIL and compiled with ailc (job-dog1-11091728)
+
+Dogfooding, no compiler change. `lab/dogfood/gatestats/gatestats.py` (plain annotated Python, built by
+`AIL_CURRENT/ailc.py`) reads the integration-gate log and prints per-day candidates, merged jobs, red
+batches, red-alone jobs, culprit-unavailable events, and red-to-resolution hours, plus the top five
+modules that broke. The fixture `lab/dogfood/gatestats/fixture/ci_integ.out` is the 400-line task
+excerpt plus three noise lines; `expected.out` is the CPython reference.
+
+The tool works: CPython and the native binary are byte-identical on the fixture and on 11 probes
+(day rollover, empty/noise input, unresolved red, multiple reds before a candidate, culprit-only,
+shared-file merge, top-5 truncation), with both the default and the forced general build. The
+`--strict` build succeeds (same 99,120-byte binary and SHA-256 as default), so the typed path built
+the whole program. Cold compile median 1.78 s (warm cache 0.21 s); run median 0.0006 s and peak RSS
+1,968 KB versus CPython 0.020 s and 13,156 KB on the fixture (median of 5). Friction: three `check`
+rounds, about 6 minutes, mostly a refusal of `list[tuple[int, str]]` ("`top` is a srows") that did
+not name the replacement; see `lab/dogfood/gatestats/FRICTION.md` for the table and probes.
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass (3 modules, 0 failed).
+## 2026-11-09 -- obs3 re-applied: list results, `list[float]` parameters, seeded return kinds (job-rbobs3-11091728)
+
+Re-applied the accepted `job-obs3-op1109` change (diff of `eb8b28cf`..`FETCH_HEAD`, `.agent`,
+`corpus` and `MANIFEST.json` excluded) on this tree.  The tree's copies of `ail_observe.py`,
+`test_ail_observe.py`, `OBSERVED_TYPES.md`, `ail_cpython_hybrid.py` and the example files were
+byte-identical to obs2's tip `da769941`, so the obs3 part applied cleanly: 8 files, 12,491
+insertions / 37 deletions (two `lab/wedge/obs3_task{2,3}.json` measurement files, the new
+`test_ail_hybrid_lists.py` and its `tests.d` registration, and the hybrid/proof/docs/example
+edits).  No conflict was left to resolve; the re-applied files are byte-identical to `FETCH_HEAD`.
+`tools/diff_ids.py` is not present on this tree, so only `python3 tools/update_manifest.py` ran
+(pins for `test_ail_hybrid_lists.py` and `tests.d/test_ail_hybrid_lists.txt`; `--check` exits 0).
+
+Behaviour: a hybrid function returning `list[int]` / `list[float]` is native only when
+`_list_return_proof` proves a fresh local built by `[]`/a literal/`[c] * n` with exact int (never
+bool) or float elements, read back from the clone's buffer (long results via the spill slot);
+a `list[float]` parameter is passed as `ail_flist` (`_unit_abi`), and `len()` is not a mutation;
+non-int units fall back on a reachable int64-overflow/index stop, and IR's `xs[i] op= v` set stays
+checked.  A scalar `-> bool`/`int` annotation seeds the result kind only when every return value
+has that exact type (`return a and b` over ints stays CPython), and a loop-free body keeps the GIL.
+Measured in `obs3_task3.json` / `obs3_task2.json`: natives 29 -> 44 -> 47, corpus 0.934 -> 0.719 ->
+0.697 (1.43x vs CPython).
+
+Probes in `/tmp/probes`: `obs3_probe.py` (list results/`list[float]` params/scalar bools, both
+`g` and `d` builds via `cmp.sh` -- same stdout/exit); hybrid module+runner pairs
+`obs3_lists.py`/`obs3_lists_run.py` and `obs3_bools.py`/`obs3_bools_run.py` built with
+`ail build --cpython` -- stdout/exit equal to CPython byte for byte, with `_ail_is_native` true for
+`squares`, `scaled`, `grid`, `bucket`, `dotf`, `count_len`, `fmul`, `is_ident_start`, `in_range`,
+`either`, `positive` and false for the refused `flags` (bool elements), `mixed` (mixed types),
+`alias_ret` (parameter identity), `empty_ret`, `in_limit` (module constant), `lies` (`int` and
+annotated `bool`) and `count` (calls a user function).  They cover empty/0/64/65/200000-element
+results, inf/-0.0/1e300 floats, negative and overflowing sizes, index stops, int-overflow float
+results, and list values reaching a call through an argument, a list item, an attribute and a dict
+value.  Tests on this tree, `tools/par_check.py -j 2`: `test_ail_hybrid_lists`,
+`test_ail_cpython_hybrid`, `test_ail_observe`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` -- 6 modules, 0 failed, 256 s.
 
 ## 2026-11-08 -- fz243: the reported seed does not reproduce on this tree; no code changed (job-fz243-11090607)
 
