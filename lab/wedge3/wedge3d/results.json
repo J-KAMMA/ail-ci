@@ -1,0 +1,507 @@
+{
+  "ail": "../obs5/AIL_CURRENT",
+  "ail_commit": "69e2dcd0a82580fa06e26b275352fbedfb7d31e1",
+  "libraries": [
+    {
+      "annotated_output_matches": true,
+      "cpython": {
+        "median_s": 1.1045559780000076,
+        "times_s": [
+          1.101092,
+          1.12169,
+          1.163739,
+          1.104556,
+          1.102123
+        ]
+      },
+      "driver_env": {
+        "W3D_N": "50000"
+      },
+      "functions": {
+        "defs": 58,
+        "methods": 54,
+        "native_plain": 0,
+        "top_level": 2
+      },
+      "functions_observed": {
+        "defs": 58,
+        "methods": 54,
+        "native_observed": 0,
+        "top_level": 2
+      },
+      "hot_module": "dateutil/parser/_parser.py",
+      "hybrid": {
+        "median_s": 1.1061932559998695,
+        "times_s": [
+          1.141347,
+          1.154637,
+          1.097127,
+          1.106193,
+          1.10269
+        ]
+      },
+      "hybrid_ratio_cpython": 1.001,
+      "hybrid_ratio_native": 7.536,
+      "hybrid_ratio_pypy": 1.028,
+      "hybrid_report": {
+        "accelerated": [],
+        "extension": null,
+        "module": "_ail__parser_fast",
+        "python": "3.12.3",
+        "python_file": "_parser.py",
+        "rejected": {
+          "ParserError.__repr__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "ParserError.__str__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_parsetz": "not a typed candidate, stays in CPython",
+          "_resultbase.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "_resultbase.__len__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "_resultbase.__repr__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "_resultbase._repr": "method: self is stored to or used other than by reading an attribute, stays in CPython",
+          "_timelex.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.__iter__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.__next__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.get_token": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.isnum": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.isspace": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.isword": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.next": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.split": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_tzparser.parse": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd._resolve_from_stridxs": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.append": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.could_be_day": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.has_day": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.has_month": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.has_year": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.resolve_ymd": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parse": "not a typed candidate, stays in CPython",
+          "parser.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._adjust_ampm": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._ampm_valid": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._assign_hms": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._assign_tzname": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._build_naive": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._build_tzaware": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._build_tzinfo": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._could_be_tzname": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._find_hms_idx": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._parse": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._parse_hms": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._parse_min_sec": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._parse_numeric_token": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._parsems": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._recombine_skipped": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._to_decimal": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser.parse": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo._convert": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.ampm": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.convertyear": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.hms": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.jump": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.month": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.pertain": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.tzoffset": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.utczone": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.validate": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.weekday": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython"
+        },
+        "run_file": "_parser_run.py",
+        "schema": "ail.cpython_hybrid/2",
+        "source": "<work>/dateutil/plain/dateutil/parser/_parser.py"
+      },
+      "library": "dateutil",
+      "native": {
+        "median_s": 0.1467966009997781,
+        "times_s": [
+          0.148669,
+          0.14715,
+          0.146003,
+          0.145949,
+          0.146797
+        ]
+      },
+      "native_ratio_cpython": 0.133,
+      "native_rewrite": "ciso8601 (C)",
+      "observed": {
+        "median_s": 1.1013116980000177,
+        "times_s": [
+          1.109952,
+          1.101312,
+          1.124419,
+          1.094703,
+          1.099801
+        ]
+      },
+      "observed_ratio_cpython": 0.997,
+      "observed_ratio_native": 7.502,
+      "observed_ratio_pypy": 1.024,
+      "observed_report": {
+        "accelerated": [],
+        "extension": null,
+        "module": "_ail__parser_fast",
+        "python": "3.12.3",
+        "python_file": "_parser.py",
+        "rejected": {
+          "ParserError.__repr__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "ParserError.__str__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_parsetz": "not a typed candidate, stays in CPython",
+          "_resultbase.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "_resultbase.__len__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "_resultbase.__repr__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "_resultbase._repr": "method: self is stored to or used other than by reading an attribute, stays in CPython",
+          "_timelex.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.__iter__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.__next__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.get_token": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.isnum": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.isspace": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.isword": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.next": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_timelex.split": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_tzparser.parse": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd._resolve_from_stridxs": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.append": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.could_be_day": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.has_day": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.has_month": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.has_year": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "_ymd.resolve_ymd": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parse": "not a typed candidate, stays in CPython",
+          "parser.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._adjust_ampm": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._ampm_valid": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._assign_hms": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._assign_tzname": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._build_naive": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._build_tzaware": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._build_tzinfo": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._could_be_tzname": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._find_hms_idx": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._parse": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._parse_hms": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._parse_min_sec": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._parse_numeric_token": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._parsems": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._recombine_skipped": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser._to_decimal": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parser.parse": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo._convert": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.ampm": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.convertyear": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.hms": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.jump": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.month": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.pertain": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.tzoffset": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.utczone": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.validate": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "parserinfo.weekday": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython"
+        },
+        "run_file": "_parser_run.py",
+        "schema": "ail.cpython_hybrid/2",
+        "source": "<work>/dateutil/obs/dateutil/parser/_parser.py"
+      },
+      "output": "count=50000 hash=4a1eda6998f62954 first=N1970-01-01T00:00:00 last=A2033-06-16T14:28:43.450009",
+      "package": "dateutil",
+      "pypy": {
+        "median_s": 1.0756559310000284,
+        "times_s": [
+          1.075273,
+          1.083009,
+          1.075656,
+          1.069931,
+          1.076829
+        ]
+      },
+      "pypy_version": "Python 3.10.16 (64367dfeb263, Feb 24 2025, 17:31:14)",
+      "refusals": {
+        "hot_self_s": 2.473215,
+        "native_self_s": 0.0,
+        "reasons": [
+          {
+            "functions": [
+              "_timelex.__init__",
+              "_timelex.__iter__",
+              "_timelex.__next__",
+              "_timelex.get_token",
+              "_timelex.isnum",
+              "_timelex.isspace",
+              "_timelex.isword",
+              "_timelex.split",
+              "_ymd.__init__",
+              "_ymd.append",
+              "_ymd.has_year",
+              "_ymd.resolve_ymd",
+              "parser.__init__",
+              "parser._assign_tzname",
+              "parser._build_naive",
+              "parser._build_tzaware",
+              "parser._could_be_tzname",
+              "parser._find_hms_idx",
+              "parser._parse",
+              "parser._parse_min_sec",
+              "parser._parse_numeric_token",
+              "parser._parsems",
+              "parser._to_decimal",
+              "parser.parse",
+              "parserinfo.__init__",
+              "parserinfo._convert",
+              "parserinfo.ampm",
+              "parserinfo.convertyear",
+              "parserinfo.hms",
+              "parserinfo.jump",
+              "parserinfo.month",
+              "parserinfo.tzoffset",
+              "parserinfo.validate",
+              "parserinfo.weekday"
+            ],
+            "reason": "method of a class with decorators, bases, a metaclass or class attributes",
+            "self_s": 2.307035
+          },
+          {
+            "functions": [
+              "<genexpr>",
+              "<module>",
+              "ParserError",
+              "UnknownTimezoneWarning",
+              "_attr",
+              "_result",
+              "_resultbase",
+              "_timelex",
+              "_tzparser",
+              "_ymd",
+              "parser",
+              "parserinfo"
+            ],
+            "reason": "no refusal recorded (not selected as a candidate)",
+            "self_s": 0.077784
+          },
+          {
+            "functions": [
+              "_resultbase.__init__",
+              "_resultbase.__len__"
+            ],
+            "reason": "a decorated, dunder or non-plain-signature method",
+            "self_s": 0.064767
+          },
+          {
+            "functions": [
+              "parse"
+            ],
+            "reason": "not a typed candidate",
+            "self_s": 0.023628
+          }
+        ]
+      },
+      "workload": "date_parse.py"
+    },
+    {
+      "annotated_output_matches": true,
+      "cpython": {
+        "median_s": 1.2084275890001663,
+        "times_s": [
+          1.198946,
+          1.256013,
+          1.217568,
+          1.208428,
+          1.206915
+        ]
+      },
+      "driver_env": {
+        "W3D_REPEATS": "100000"
+      },
+      "functions": {
+        "defs": 17,
+        "methods": 17,
+        "native_plain": 0,
+        "top_level": 0
+      },
+      "functions_observed": {
+        "defs": 17,
+        "methods": 17,
+        "native_observed": 0,
+        "top_level": 0
+      },
+      "hot_module": "ahocorapy/keywordtree.py",
+      "hybrid": {
+        "median_s": 1.2093614230000185,
+        "times_s": [
+          1.231184,
+          1.209389,
+          1.202404,
+          1.209361,
+          1.20454
+        ]
+      },
+      "hybrid_ratio_cpython": 1.001,
+      "hybrid_ratio_native": 8.103,
+      "hybrid_ratio_pypy": 3.379,
+      "hybrid_report": {
+        "accelerated": [],
+        "extension": null,
+        "module": "_ail_keywordtree_fast",
+        "python": "3.12.3",
+        "python_file": "keywordtree.py",
+        "rejected": {
+          "KeywordTree.__getstate__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "KeywordTree.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "KeywordTree.__setstate__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "KeywordTree.__str__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "KeywordTree._compile_skip_pattern": "method: field self._zero_state has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree._precompute_outputs": "method: field self._zero_state has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree._search_all_generic": "method: field self._zero_state has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree._search_all_string": "method: field self._zero_state has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree.add": "method: field self._finalized has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree.finalize": "method: field self._finalized has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree.search": "method: calls a method that stays in CPython, stays in CPython",
+          "KeywordTree.search_all": "method: field self._case_insensitive has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree.search_lss": "method: field self._zero_state has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree.search_lss_for_children": "method: calls a method that stays in CPython, stays in CPython",
+          "KeywordTree.search_one": "method: calls a method that stays in CPython, stays in CPython",
+          "State.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "State.__str__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython"
+        },
+        "run_file": "keywordtree_run.py",
+        "schema": "ail.cpython_hybrid/2",
+        "source": "<work>/ahocorapy/plain/ahocorapy/keywordtree.py"
+      },
+      "library": "ahocorapy",
+      "native": {
+        "median_s": 0.14924857999994856,
+        "times_s": [
+          0.150378,
+          0.149249,
+          0.149393,
+          0.148819,
+          0.149187
+        ]
+      },
+      "native_ratio_cpython": 0.124,
+      "native_rewrite": "ahocorasick_rs (Rust)",
+      "observed": {
+        "median_s": 1.209332884999867,
+        "times_s": [
+          1.211877,
+          1.209333,
+          1.206062,
+          1.212903,
+          1.192182
+        ]
+      },
+      "observed_ratio_cpython": 1.001,
+      "observed_ratio_native": 8.103,
+      "observed_ratio_pypy": 3.379,
+      "observed_report": {
+        "accelerated": [],
+        "extension": null,
+        "module": "_ail_keywordtree_fast",
+        "python": "3.12.3",
+        "python_file": "keywordtree.py",
+        "rejected": {
+          "KeywordTree.__getstate__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "KeywordTree.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "KeywordTree.__setstate__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "KeywordTree.__str__": "a decorated, dunder or non-plain-signature method stays in CPython",
+          "KeywordTree._compile_skip_pattern": "method: field self._zero_state has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree._precompute_outputs": "method: field self._zero_state has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree._search_all_generic": "method: field self._zero_state has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree._search_all_string": "method: field self._zero_state has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree.add": "method: field self._finalized has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree.finalize": "method: field self._finalized has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree.search": "method: calls a method that stays in CPython, stays in CPython",
+          "KeywordTree.search_all": "method: field self._case_insensitive has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree.search_lss": "method: field self._zero_state has no scalar or int/float list kind, stays in CPython",
+          "KeywordTree.search_lss_for_children": "method: calls a method that stays in CPython, stays in CPython",
+          "KeywordTree.search_one": "method: calls a method that stays in CPython, stays in CPython",
+          "State.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+          "State.__str__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython"
+        },
+        "run_file": "keywordtree_run.py",
+        "schema": "ail.cpython_hybrid/2",
+        "source": "<work>/ahocorapy/obs/ahocorapy/keywordtree.py"
+      },
+      "output": "patterns=500 repeats=100000 textlen=19205994 matches=500 hash=63d4901c7bad2495 first=(19200001, 'p000alwh') last=(19205984, 'p499hsdozk')",
+      "package": "ahocorapy",
+      "pypy": {
+        "median_s": 0.35794329899999866,
+        "times_s": [
+          0.359213,
+          0.353073,
+          0.34899,
+          0.399401,
+          0.357943
+        ]
+      },
+      "pypy_version": "Python 3.10.16 (64367dfeb263, Feb 24 2025, 17:31:14)",
+      "refusals": {
+        "hot_self_s": 2.679777,
+        "native_self_s": 0.0,
+        "reasons": [
+          {
+            "functions": [
+              "KeywordTree._compile_skip_pattern",
+              "KeywordTree._precompute_outputs",
+              "KeywordTree._search_all_string",
+              "KeywordTree.search_lss"
+            ],
+            "reason": "method: field self._zero_state has no scalar or int/float list kind",
+            "self_s": 2.674377
+          },
+          {
+            "functions": [
+              "KeywordTree.add",
+              "KeywordTree.finalize"
+            ],
+            "reason": "method: field self._finalized has no scalar or int/float list kind",
+            "self_s": 0.002114
+          },
+          {
+            "functions": [
+              "KeywordTree.search_lss_for_children"
+            ],
+            "reason": "method: calls a method that stays in CPython",
+            "self_s": 0.002068
+          },
+          {
+            "functions": [
+              "State.__init__"
+            ],
+            "reason": "method of a class with decorators, bases, a metaclass or class attributes",
+            "self_s": 0.001203
+          },
+          {
+            "functions": [
+              "<module>",
+              "KeywordTree",
+              "State"
+            ],
+            "reason": "no refusal recorded (not selected as a candidate)",
+            "self_s": 1.3e-05
+          },
+          {
+            "functions": [
+              "KeywordTree.__init__"
+            ],
+            "reason": "a decorated, dunder or non-plain-signature method",
+            "self_s": 2e-06
+          },
+          {
+            "functions": [
+              "KeywordTree.search_all"
+            ],
+            "reason": "method: field self._case_insensitive has no scalar or int/float list kind",
+            "self_s": 1e-06
+          }
+        ]
+      },
+      "workload": "aho_search.py"
+    }
+  ],
+  "pypy": "/opt/hostedtoolcache/PyPy/3.10.16/x64/bin/pypy3",
+  "python": "Python 3.12.3",
+  "schema": "ail.wedge3d/1"
+}

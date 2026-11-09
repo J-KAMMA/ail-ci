@@ -1,0 +1,5 @@
+# Pinned at run time into a CPython 3.12 venv; the pure parts are also installed into PyPy 3.10.16.
+python-dateutil==2.9.0.post0
+ahocorapy==1.8.0
+ciso8601==2.3.3
+ahocorasick_rs==1.0.3

@@ -79,6 +79,26 @@ five `hb_*_mod.py`+`hb_*_run.py` module/runner pairs through `ail build --cpytho
 CPython stdout and exit with every accelerated function reporting `_ail_is_native` true (basic
 types/defaults/keywords/arity, int64 overflow through an argument, list item, dict value and
 attribute, indexing and dict traps, nested `a[n][m]`, channels and aliasing).
+## 2026-11-09 -- wedge3b: pydantic v1 and sqlparse, pure Python versus Rust (job-wedge3b-11091226)
+
+Adds `lab/wedge3/wedge3b/` (measurement only; no compiler or library source changed). The hybrid is
+built from `job-obs5-op1109` at commit `69e2dcd0`. Pydantic 1.10.27 (pure, `--no-binary`) versus
+pydantic 2.14.3 (pydantic-core, Rust), and sqlparse 0.6.1 versus sqlglot 26.33.0 with the real
+`sqlglotrs` Rust extension. Result: **0 of 137 top-level functions in the two libraries' hot modules
+go native**, so the hybrid runs at CPython parity (hybrid/CPython 0.96x-1.01x), while the Rust
+rewrites run 2.35x and 2.83x faster than CPython. The ranked blockers are methods of classes with
+bases/attributes (73.2% of pydantic's profiled hot-module self time, 53.5% of sqlparse's),
+top-level functions whose observed kinds are unions/tuple or `None` returns (20.9%, 24.1%), nested
+helpers (5.9%, 13.9%), and list-typed `self` fields. `ail_observe.py annotate` adds 98 annotation
+lines to sqlparse and one to pydantic but unlocks no candidate (`-> None`, `int|None`/`type|None`,
+and pydantic's pre-existing `Any`). All five builds of each workload (CPython, PyPy 3.10.16, hybrid
+plain, hybrid observed, native rewrite) match byte for byte; `perf_event_open` is denied so there
+are no icounts. One tooling limitation: `build --cpython` on a package module inserts the module
+directory into `sys.path`, which shadows stdlib `json`/`typing` for pydantic; the measurement builds
+from a one-file staging directory. Probes: `lab/wedge3/wedge3b/probes/` (four files; the general
+build refuses two by name at the int64 constant boundary, the hybrid matches all four). See
+`lab/wedge3/wedge3b/RESULTS.md`.
+
 
 ## 2026-11-08 -- aiknow1: agent-facing AIL material (job-aiknow1-11081958)
 
