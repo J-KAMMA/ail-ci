@@ -53,6 +53,43 @@ REFUSED = [
     "lambda *, **kw: 1", "lambda x, /, /: 1", "yield x",
 ]
 
+# shparse2 snippets: 5 S376-legal modules and 15 that CPython's ast.parse rejects.  The test only
+# requires that ailparse.parse and ast.parse agree on error versus no error (messages may differ).
+SNIPPETS = [
+    "return 1\n",
+    "yield 1\n",
+    "x = 1; y = 2\n",
+    "if x: pass\nelif y: pass\nelse: pass\n",
+    "with a as b, c as d: pass\n",
+    "x = (1\n",
+    "if x:\npass\n",
+    "def f(:\n    pass\n",
+    "x =\n",
+    "1 +\n",
+    "x = 1 +\n",
+    "if x:\n    pass\n  else:\n    pass\n",
+    "x = 'unterminated\n",
+    "for x in:\n    pass\n",
+    "def f():\n",
+    "class C(:\n    pass\n",
+    "try:\n    pass\n",
+    "with x as:\n    pass\n",
+    "import\n",
+    "from import x\n",
+]
+
+
+def module_dump_ail(path):
+    with open(path, encoding="utf-8", newline="") as f:
+        text = f.read()
+    return ailast.dump(ailparse.parse(text))
+
+
+def module_dump_ref(path):
+    with open(path, encoding="utf-8", newline="") as f:
+        text = f.read()
+    return ast.dump(ast.parse(text, filename=path), include_attributes=False)
+
 # Format specs CPython's own 3.12 patch releases do not agree on.  `ailparse` reproduces the tree of
 # the version lab/selfhost/PARSE.md pins (3.12.0-3.12.3), so the expected dump is written here
 # instead of taken from the running interpreter; 3.12.4 and later moved an escaped `{{` out of a
@@ -210,6 +247,28 @@ class ParseTest(unittest.TestCase):
                 with self.assertRaises(ailparse.ParseError) as cm:
                     ailparse.parse_expr(text)
                 self.assertTrue(str(cm.exception).startswith("ailparse:"))
+
+    def test_s376_30_modules_stage1(self):
+        files = fixed_files()
+        self.assertEqual(len(files), 30)
+        for path in files:
+            with self.subTest(path=path):
+                self.assertEqual(module_dump_ail(path), module_dump_ref(path))
+
+    def test_error_snippets_agree_with_ast(self):
+        for text in SNIPPETS:
+            with self.subTest(text=text[:60]):
+                py_err = False
+                try:
+                    ast.parse(text)
+                except SyntaxError:
+                    py_err = True
+                ail_err = False
+                try:
+                    ailparse.parse(text)
+                except SyntaxError:
+                    ail_err = True
+                self.assertEqual(ail_err, py_err)
 
     @unittest.skipUnless(HAVE_CC, "no C compiler")
     def test_stage2_matches_stage1(self):
