@@ -1,3 +1,24 @@
+## 2026-11-09 -- aicomp1: where AIL stands on AI compute today (measurement only) (job-aicomp1-11091640)
+
+Adds `lab/aicomp/` only; no compiler, runtime or test module changed. `bench.py` generates one
+algorithm per case in AIL (typed, `--strict`), NumPy 2.5.4 (OpenBLAS 0.3.34), PyTorch 2.5.1+cpu,
+plain C (`gcc -O2 -ffp-contract=off`) and CPython (f64, smallest rows), all single-threaded, and
+records the median of 5 process walls, child CPU seconds and peak RSS in `results.json`/`RESULTS.md`.
+18 cases: matmul 256/1024/2048 f64 and f32, elementwise `a*b+c`/relu over 10M, sum over 10M,
+row softmax over 1024x1024, MLP 64-784-512-10, and the attention core of a transformer block
+(seq 128, dim 64).
+
+Headline numbers: AIL is the fastest column on elementwise f64 (152 ms, 1.00x) and sum f64
+(34.5 ms, 1.00x), and within 1.2-2.8x of the best on most small/medium cases. Its three largest
+gaps are matmul 2048 f64 (5354 ms, 11.1x NumPy's 482 ms), softmax 1024 f32 (114.5 ms, 9.6x C's
+11.9 ms) and matmul 1024 f64 (690 ms, 5.1x NumPy's 134 ms). The f32 path pays for the per-op
+round-to-f32 helper (elementwise f32 323 ms vs C 115 ms). AIL's f64 outputs agree with NumPy to
+<=4.1e-16 relative on these checks; f32 to <=7.9e-7 (C) / <=6.9e-10 (AIL matmul). The full
+transformer block is not expressible: layer norm, 2-D reductions, row broadcast and a fused
+softmax are missing; the attention core is written with manual row loops. No Vulkan device on
+the runner (loader present, no ICD), and the GPU path covers marked loops only, not `ta.matmul`.
+12 small probes (`lab/aicomp/probes.py`) match CPython on both the default and unified builds.
+
 ## 2026-11-08 -- fz243: the reported seed does not reproduce on this tree; no code changed (job-fz243-11090607)
 
 The daily fuzzer (run 42517310228, seed `2076519205`, CPython 3.12, modes default+ir) recorded
