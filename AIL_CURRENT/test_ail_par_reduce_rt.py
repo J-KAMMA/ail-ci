@@ -42,7 +42,7 @@ typedef struct { int kind; int64_t v, w; } red_item;          /* kind: 0 a value
 typedef struct { const red_item *it; int shape; int64_t delay; red_shared *sh; } red_args;
 static void red_delay(int64_t d) { for (volatile int64_t k = 0; k < d; k++) {} }
 /* The sequential checked loop: shape 0 `acc += v`, 1 `acc -= v`, 2 `acc += v; neg -= w`. */
-static void red_rerun(void **args, int64_t lo, int64_t hi, int64_t *acc) {
+static void red_rerun(void **args, int64_t lo, int64_t hi, volatile int64_t **acc) {
     red_args *A = (red_args *)args[0];
     for (int64_t k = lo; k < hi; k++) {
         A->sh->at = k;
@@ -50,10 +50,10 @@ static void red_rerun(void **args, int64_t lo, int64_t hi, int64_t *acc) {
         const red_item *x = &A->it[k];
         if (x->kind) ail_raise_named(x->kind);
         int64_t r;
-        if (A->shape == 1) { if (__builtin_sub_overflow(acc[0], x->v, &r)) ail_die(SUB_TEXT); acc[0] = r; continue; }
-        if (__builtin_add_overflow(acc[0], x->v, &r)) ail_die(ADD_TEXT);
-        acc[0] = r;
-        if (A->shape == 2) { if (__builtin_sub_overflow(acc[1], x->w, &r)) ail_die(SUB_TEXT); acc[1] = r; }
+        if (A->shape == 1) { if (__builtin_sub_overflow(*acc[0], x->v, &r)) ail_die(SUB_TEXT); *acc[0] = r; continue; }
+        if (__builtin_add_overflow(*acc[0], x->v, &r)) ail_die(ADD_TEXT);
+        *acc[0] = r;
+        if (A->shape == 2) { if (__builtin_sub_overflow(*acc[1], x->w, &r)) ail_die(SUB_TEXT); *acc[1] = r; }
     }
 }
 /* fn, plain: every prefix in __int128. */
@@ -111,11 +111,12 @@ static int red_child(int par, red_args *A, int64_t n, int64_t prefix, int64_t ca
         close(fd[0]); dup2(fd[1], 1); dup2(fd[1], 2); close(fd[1]);
         SH->acc[0] = start[0]; SH->acc[1] = start[1]; SH->at = -1;
         void *args[1] = {A};
-        if (!par) red_rerun(args, 0, n, SH->acc);
+        volatile int64_t *accp[2] = {&SH->acc[0], &SH->acc[1]};
+        if (!par) red_rerun(args, 0, n, accp);
         else {
             ail_par_site S = {0, heavy ? 1 : 0};
-            red_rerun(args, 0, prefix, SH->acc);
-            ail_par_reduce_run(fast ? red_fn64 : red_fn128, args, prefix, n, &S, cap, A->shape == 2 ? 2 : 1, SH->acc, red_rerun);
+            red_rerun(args, 0, prefix, accp);
+            ail_par_reduce_run(fast ? red_fn64 : red_fn128, args, prefix, n, &S, cap, A->shape == 2 ? 2 : 1, accp, red_rerun);
         }
         SH->at = n;
         fputs("ok\n", stdout);
@@ -174,15 +175,15 @@ int main(void) {
 COST = r"""
 #define ADD_TEXT "OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)"
 static inline int64_t term(int64_t i) { return i % 1000; }
-static void c_rerun(void **args, int64_t lo, int64_t hi, int64_t *acc) {
+static void c_rerun(void **args, int64_t lo, int64_t hi, volatile int64_t **acc) {
     (void)args;
-    int64_t a = acc[0];
+    int64_t a = *acc[0];
     for (int64_t i = lo; i < hi; i++) {
         int64_t r;
-        if (__builtin_add_overflow(a, term(i), &r)) { acc[0] = a; ail_die(ADD_TEXT); }
+        if (__builtin_add_overflow(a, term(i), &r)) { *acc[0] = a; ail_die(ADD_TEXT); }
         a = r;
     }
-    acc[0] = a;
+    *acc[0] = a;
 }
 static void c_fn(void **args, int64_t lo, int64_t hi, ail_red_part *parts) {
     (void)args;
@@ -199,10 +200,11 @@ static void c_fn(void **args, int64_t lo, int64_t hi, ail_red_part *parts) {
 int main(int argc, char **argv) {
     int64_t n = argc > 2 ? atoll(argv[2]) : 10000000;
     int64_t acc[1] = {0};
+    volatile int64_t *accp[1] = {&acc[0]};
     void *args[1] = {NULL};
     static ail_par_site site;
-    if (argc > 1 && argv[1][0] == 'p') ail_par_reduce_run(c_fn, args, 0, n, &site, 0, 1, acc, c_rerun);
-    else c_rerun(args, 0, n, acc);
+    if (argc > 1 && argv[1][0] == 'p') ail_par_reduce_run(c_fn, args, 0, n, &site, 0, 1, accp, c_rerun);
+    else c_rerun(args, 0, n, accp);
     printf("%lld\n", (long long)acc[0]);
     return 0;
 }
