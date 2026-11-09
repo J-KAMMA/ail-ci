@@ -28725,6 +28725,8 @@ def _par_for(node, ctx, ind):
     ctx.parts.add('PAR')
     if info.get('reductions'):
         ctx.parts.add('PARRED')                 # cruntime.py: the exact shared-int reduction
+        if info.get('fsum_fixed'):
+            ctx.parts.add('PARREDF')            # cruntime.py: the fixed-order float variant (opt-in)
     if info.get('cap'):
         ctx.parts.add('PARN')                   # typedpar.py: at most `workers` threads
     if info.get('appends'):
@@ -28739,6 +28741,7 @@ def _par_for(node, ctx, ind):
                                   'writes': ['v_' + n for n in info['writes']],
                                   'fresh': ['v_' + n for n in ctx.locals[first_local:]],
                                   'reductions': info.get('reductions') or [],
+                                  'fsum_fixed': bool(info.get('fsum_fixed')),
                                   'appends': info.get('appends') or [],
                                   'line': getattr(node, 'lineno', None)}
     if info.get('cap'):
@@ -28765,6 +28768,21 @@ def _red_stmt(text, acc, j, op, chunk):
         t2 = p.strip().lstrip('(').split(' = ')[0]
         return ('%s%s = (%s, ail_red_%s(%s, %s));\n%s*_acc[%d] = %s;\n'
                 % (i, acc, p, 'sub' if op == '-' else 'add', acc, t2, i, j, acc))
+    return re.sub(r'(?m)^([ \t]*)' + re.escape(acc) + r' = \((.*)\);\s*$', one, text)
+
+
+def _fsum_stmt(text, acc, j, op):
+    """`acc += e` for the fixed-order float chunk worker: add `e` to the chunk sum `_sJ`."""
+    def one(m):
+        rhs, parts, depth, begin = m[2], [], 0, 0
+        for i, ch in enumerate(rhs):
+            depth += (ch == '(') - (ch == ')')
+            if ch == ',' and not depth:
+                parts.append(rhs[begin:i]); begin = i + 1
+        parts.append(rhs[begin:])
+        i, p = m[1], parts[1]
+        return ('%s{ double _t = _s%d %s (double)%s; _s%d = _t; %s = _t; }\n'
+                % (i, j, '-' if op == '-' else '+', p, j, acc))
     return re.sub(r'(?m)^([ \t]*)' + re.escape(acc) + r' = \((.*)\);\s*$', one, text)
 
 
@@ -28872,12 +28890,32 @@ def _par_outline(generated, sig, decls, ctx, cname):
             '        if (%s == %s) ail_die("parallel for: two names refer to one bytearray");\n' % (w, other)
             for w in refs if w in facts['writes'] for other in refs
             if other != w and not (other in facts['writes'] and other < w))
-        for n, _ in reds:
-            c = 'v_' + n
-            if (local[c][0] if c in local else params.get(c)) != 'int64_t':
-                raise Unsupported('parallel for%s: %r carries a value between iterations, so it must be an '
-                                  'int local of the enclosing function; write instead: write it into a list '
-                                  'element xs[i] and combine the list after the loop' % (where, n))
+        kinds = [(n, op, local['v_' + n][0] if 'v_' + n in local else params.get('v_' + n))
+                 for n, op in reds]
+        fsum = bool(facts.get("fsum_fixed")) and bool(kinds) and all(t == "double" for _, _, t in kinds)
+        if reds and not fsum:
+            for n, _, t in kinds:
+                if t != 'int64_t':
+                    raise Unsupported('parallel for%s: %r carries a value between iterations, so it must be an '
+                                      'int local of the enclosing function; write instead: write it into a list '
+                                      'element xs[i] and combine the list after the loop' % (where, n))
+        if fsum:
+            body = text
+            for j, (n, op, _) in enumerate(kinds):
+                body = _fsum_stmt(body, 'v_' + n, j, op)
+            lines = ['static void %s(void **_a, int64_t _lo, int64_t _hi, double *_p) {\n' % worker]
+            lines += head + ['    double v_%s = -0.0;\n' % n for n, _, _ in kinds]
+            lines += ['    double _s%d = -0.0;\n' % j for j in range(len(kinds))]
+            lines += priv + [body]
+            lines += ['    _p[%d] = _s%d;\n' % (j, j) for j in range(len(kinds))]
+            lines += ['}\n']
+            workers.append(''.join(lines))
+            accs = ', '.join('&v_' + n for n, _, _ in kinds)
+            return ('    {\n        void *_pa%d[] = {%s};\n        volatile double *_fr%d[] = {%s};\n%s'
+                    '        ail_par_fsum_run(%s, _pa%d, %s, %s, %s, %d, _fr%d);\n'
+                    '    }\n'
+                    % (k, array, k, accs, guards, worker, k, facts['lo'], facts['hi'],
+                       facts['cap'] if facts.get('cap') else '0', len(kinds), k))
         if reds:
             body, rerun = text, text
             for j, (n, op) in enumerate(reds):
