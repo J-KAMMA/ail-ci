@@ -21,6 +21,11 @@ on:
       extra:
         description: 'optional second job-* branch to run on this same runner'
         default: ''
+      agent:
+        # (2026-11-06 owner) 'opus': Claude Code on the owner's subscription (CLAUDE_CODE_OAUTH_TOKEN) writes the work
+        # (Opus) and reviews it (Sonnet); 'auto': the free/flat-rate chain in pipeline.sh
+        description: 'auto or opus'
+        default: 'auto'
 
 permissions:
   contents: write
@@ -44,11 +49,24 @@ jobs:
         env:
           K: ${{ secrets.OPENCODE_API_KEY }}
           Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
+          C: ${{ secrets.COMMAND_CODE_API_KEY }}
+          G: ${{ secrets.GH_MODELS_TOKEN }}
+          L: ${{ inputs.agent == 'opus' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: |
           umask 077
+          # Claude Code subscription token, only for agent=opus runs; pipeline.sh hands it to the claude process alone
+          # (2026-11-06) a token piped in from PowerShell carries a trailing CR/LF: strip whitespace, or Claude says "Not logged in"
+          [ -n "$L" ] && printf '%s' "$L" | tr -d ' \r\n\t' > "$RUNNER_TEMP/claude.key" || true
+          [ -s "$RUNNER_TEMP/claude.key" ] && echo "claude token: $(wc -c < "$RUNNER_TEMP/claude.key") bytes, prefix ok: $(head -c 10 "$RUNNER_TEMP/claude.key" | grep -c '^sk-ant-oat')" || true
           printf '%s' "$K" > "$RUNNER_TEMP/agent.key"
           # Qoder CLI token (free DeepSeek V4.1 Flash until 2026-11-01 UTC+8); pipeline.sh reads it, public code only
           [ -n "$Q" ] && printf '%s' "$Q" > "$RUNNER_TEMP/qoder.key" || true
+          # Command Code key (GOAT plan, owner 2026-10-26): pipeline.sh tries it before the paid OpenCode Go model.
+          # The 2026-10-28 two-tasks-per-runner change dropped it by mistake, so no job used Command Code since (2026-11-03).
+          [ -n "$C" ] && printf '%s' "$C" > "$RUNNER_TEMP/cc.key" || true
+          # GitHub Models (free; owner 2026-11-04). A fine-grained token with only "Models: read", never the job token:
+          # agents run arbitrary code and the job token can push
+          [ -n "$G" ] && printf '%s' "$G" > "$RUNNER_TEMP/ghm.key" || true
       - name: OpenCode CLI
         if: inputs.harness == 'oc'
         env:
@@ -78,8 +96,12 @@ jobs:
             echo "could not check out $EXTRA: running the first task only"
           fi
       - name: Worker
+        # (2026-11-05) end the work before the job's 330-minute limit, so the key scan and the push still run and the
+        # work survives; 9 runs were cancelled at 331 minutes with everything lost
+        timeout-minutes: 312
         run: |
           git rev-parse HEAD > "$RUNNER_TEMP/start"
+          export AIL_WORKER="${{ inputs.agent }}"
           git config user.name "AIL agent"
           git config user.email "agent@example.com"
           # one task in checkout $1 with HOME $2 and scratch dir $3 (the shell runs it in a subshell, so HOME is per task)
@@ -134,12 +156,16 @@ jobs:
         env:
           K: ${{ secrets.OPENCODE_API_KEY }}
           Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
+          C: ${{ secrets.COMMAND_CODE_API_KEY }}
+          G: ${{ secrets.GH_MODELS_TOKEN }}
+          L: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          rm -f "$RUNNER_TEMP/agent.key" "$RUNNER_TEMP/qoder.key" "$HOME/.local/share/opencode/auth.json" "$RUNNER_TEMP/home2/.local/share/opencode/auth.json"
+          rm -f "$RUNNER_TEMP/agent.key" "$RUNNER_TEMP/qoder.key" "$RUNNER_TEMP/cc.key" "$RUNNER_TEMP/ghm.key" "$RUNNER_TEMP/claude.key" "$HOME/.local/share/opencode/auth.json" "$RUNNER_TEMP/home2/.local/share/opencode/auth.json"
+          rm -rf "$HOME/.claude" "$HOME/.claude.json"
           bad=0
           # scan checkout $1 (commits since the sha in $2); a clean checkout gets the marker file $3 and is pushed
           scan() {
-            for s in "$K" "$Q"; do
+            for s in "$K" "$Q" "$C" "$G" "$L"; do
               [ -n "$s" ] || continue
               if ( cd "$1" && { grep -rqF -e "$s" --exclude-dir=.git . || git log -p "$(cat "$2")..HEAD" | grep -qF -e "$s"; } ); then
                 echo "key found in results of $1: not pushing"; return 1
@@ -155,11 +181,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # the job token cannot write .github/workflows (2026-11-02: two accepted jobs were refused and lost), so edits
+          # there are squashed into one commit that keeps them under ci-proposed/workflows for the maintainer to install
+          aside() {  # checkout $1, start sha file $2
+            ( cd "$1" && st=$(cat "$2") && wf=$(git diff --name-only "$st" HEAD -- .github/workflows) && [ -n "$wf" ] || exit 0
+              mkdir -p ci-proposed/workflows
+              for f in $wf; do [ -f "$f" ] && cp "$f" ci-proposed/workflows/; done
+              { echo "agent work (workflow edits moved to ci-proposed/workflows)"; echo; git log --format='- %s' "$st..HEAD"; } > "$RUNNER_TEMP/msgs"
+              git reset -q --soft "$st"
+              for f in $wf; do git rm -q --cached --ignore-unmatch "$f"; rm -f "$f"; git checkout -q "$st" -- "$f" 2>/dev/null || true; done
+              git add -A ci-proposed && git commit -q -F "$RUNNER_TEMP/msgs" )
+          }
           push() {  # checkout $1, branch $2
-            ( cd "$1" && git add .agent/report.md $(ls .agent/pipeline.md 2>/dev/null) && { git commit -q -m "agent worker report" || true; } \
+            # (2026-11-05) a Worker cut by its step time limit leaves no report.md and maybe uncommitted edits; "git add"
+            # of the missing report failed and nothing was pushed, so re-runs started over. Keep both: the re-run
+            # continues from this branch. (The key scan above already covered the working tree.)
+            ( cd "$1" || exit 1
+              [ -f .agent/report.md ] || { cp .agent/pipeline.md .agent/report.md 2>/dev/null; echo "(worker cut at the step time limit; unfinished)" >> .agent/report.md; }
+              git add -A -- . ':(exclude).agent' ':(exclude)corpus'
+              git add .agent/report.md $(ls .agent/pipeline.md 2>/dev/null) && { git commit -q -m "agent worker report" || true; } \
               && git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" "HEAD:$2" )
           }
           rc=0
+          [ -f "$RUNNER_TEMP/ok1" ] && aside "$PWD" "$RUNNER_TEMP/start"
+          [ -f "$RUNNER_TEMP/ok2" ] && aside "$RUNNER_TEMP/w2" "$RUNNER_TEMP/start2"
           [ -f "$RUNNER_TEMP/ok1" ] && { push "$PWD" "${{ github.ref_name }}" || rc=1; }
           [ -f "$RUNNER_TEMP/ok2" ] && { push "$RUNNER_TEMP/w2" "$(cat "$RUNNER_TEMP/extra_branch")" || rc=1; }
           exit $rc
