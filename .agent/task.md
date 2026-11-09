@@ -1,3 +1,6 @@
+**Continue this job: its last run ended FINAL VERDICT: ERROR, most likely the runner time limit.** You work on the job's branch, so earlier commits are here. Read git log and the DEVLOG first, do not redo finished sub-steps, finish the rest, commit after each. Keep the run under 4 hours; cut sizes or seeds if needed and say so.
+
+--- ORIGINAL TASK ---
 **Re-apply an accepted change on top of the current tree.** Job `obs4` was accepted, but its diff no longer applies here. Fetch it anonymously: `git fetch https://github.com/J-KAMMA/ail-ci.git job-obs4-op1109`. Its change is `git diff eb8b28cf0d3515bb1fc6a06f9c91708c9560809e FETCH_HEAD -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json'`.
 
 Apply the same change to this tree, resolving conflicts by keeping both sides' fixes. Then run `python3 tools/diff_ids.py` and `python3 tools/update_manifest.py`, run the test modules the change touches plus `test_ail_safetynet`, and commit. Change nothing else.
