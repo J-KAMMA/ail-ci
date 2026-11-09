@@ -4,7 +4,7 @@ Adds `lab/aicomp/` only; no compiler, runtime or test module changed. `bench.py`
 algorithm per case in AIL (typed, `--strict`), NumPy 2.5.4 (OpenBLAS 0.3.34), PyTorch 2.5.1+cpu,
 plain C (`gcc -O2 -ffp-contract=off`) and CPython (f64, smallest rows), all single-threaded, and
 records the median of 5 process walls, child CPU seconds and peak RSS in `results.json`/`RESULTS.md`.
-18 cases: matmul 256/1024/2048 f64 and f32, elementwise `a*b+c`/relu over 10M, sum over 10M,
+16 cases: matmul 256/1024/2048 f64 and f32, elementwise `a*b+c`/relu over 10M, sum over 10M,
 row softmax over 1024x1024, MLP 64-784-512-10, and the attention core of a transformer block
 (seq 128, dim 64).
 
