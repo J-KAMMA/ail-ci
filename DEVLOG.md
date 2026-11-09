@@ -1,3 +1,48 @@
+## 2026-11-09 -- wedge3c: jellyfish 0.8.9 and msgpack 1.0.7 against the guarded hybrid (job-wedge3c-11091226)
+
+Measurement only; no compiler, runtime or test change.  `lab/wedge3/wedge3c/` adds `bench.py` (the
+single harness), two workloads, two probe programs, `results.json`, `RESULTS.md`, and pinned
+`requirements.txt` / `requirements-native.txt`.  Both pure libraries are pip-installed into venvs and
+copied to a temp dir at run time (never vendored); the hot module is made a valid AIL entry file and
+built with `ail_chatgpt.py build --cpython` from the observed-types branch `job-obs5-op1109`
+(`69e2dcd0a82580fa06e26b275352fbedfb7d31e1`, not yet integrated).
+
+The headline: **the hybrid selected 0 of the 6 jellyfish functions submitted to the build (0 of the
+module's 14) and 0 of 35 msgpack units**, so it ran at CPython parity while PyPy was 3.3-5.4x and the
+native rewrite 10.5-14.1x faster.  Times are the median of 5 under `ulimit -v 2500000`, one workload
+at a time; every column's stdout and exit status matched CPython byte for byte.
+
+| library | units | native | CPython s | PyPy s | hybrid s | hybrid+obs s | native s | hybrid/CPython | hybrid/PyPy | hybrid/native |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| jellyfish 0.8.9 / 1.1.0 (Rust) | 14 | 0 | 2.893 | 0.529 | 2.839 | 2.840 | 0.270 | 0.981 | 5.368 | 10.523 |
+| msgpack 1.0.7 pure / C ext | 35 | 0 | 2.223 | 0.673 | 2.209 | 2.211 | 0.157 | 0.994 | 3.282 | 14.056 |
+
+The sub-1.0 `hybrid/CPython` ratios are noise: no real function was selected, so the hybrid column is
+the unmodified pure library.  The msgpack native column is the C extension, not Rust -- no Rust rewrite
+exists; it is reported as the native baseline.  Observed kinds (`ail_observe annotate`) selected only
+`_normalize` (the sanitised helper the harness had to neutralise, never deployed), and split jellyfish's
+remaining gate from `unresolved-param` (all six) into four units refused as `unresolved-return: return
+branches require distinct tags` (`_jaro_winkler`, `jaro_winkler_similarity`, `levenshtein_distance`,
+`soundex`) plus `_check_type` refused as `unresolved-return: no return, or contradictory returns`; for
+msgpack they only regrouped the `_buffer` blame.  Ranked by
+CPython self time kept interpreted: jellyfish `unresolved-param: s1, s2` 1.793 s (`levenshtein_distance`),
+`s1, s2, long_tolerance` 1.022 s (`_jaro_winkler`, `jaro_winkler_similarity`), `s` 0.595 s (`_check_type`,
+`_normalize`, `soundex`); msgpack class-with-decorators/bases/metaclass 3.477 s, decorated or
+non-plain-signature method 2.348 s, `self._use_bin_type` 0.294 s, `self._buffer` 0.101 s.
+
+`tools/icount.c` builds but `perf_event_open` is denied on this runner (`perf_event_paranoid = 4`) and
+`valgrind` is absent, so no instruction counts; wall times are the only measurement.
+
+Probes in `lab/wedge3/wedge3c/probes/`, run with `bash ~/tools/cmp.sh <probe> $PWD`: `jellyfish_edges.py`
+and `msgpack_edges.py` cover empty, equal, long, numeric, negative, punctuation, argument, list-item,
+dict-value and attribute channels.  Both builds refuse each third-party import by name ("import of
+'jellyfish'/'msgpack' is not available"), which is the expected result, not a behaviour change.  The
+four installed columns (pure CPython, PyPy, hybrid, native) were byte-identical on the same probes and
+on the full workloads (`output_sha` in `results.json`).
+
+Tests on the final tree, `-j 2`: `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+-- 3 modules, 0 failed, 770 s.  `python3 tools/update_manifest.py --check` passes.
+
 ## 2026-11-08 -- fz243: the reported seed does not reproduce on this tree; no code changed (job-fz243-11090607)
 
 The daily fuzzer (run 42517310228, seed `2076519205`, CPython 3.12, modes default+ir) recorded

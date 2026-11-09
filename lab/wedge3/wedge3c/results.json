@@ -1,0 +1,531 @@
+[
+ {
+  "library": "jellyfish",
+  "package": "jellyfish",
+  "hot_module": "_jellyfish.py",
+  "functions_total": 14,
+  "functions_top_level": 14,
+  "native_functions": 0,
+  "selected_helpers": [],
+  "selected_helpers_observed": [
+   "_normalize"
+  ],
+  "build_plain": {
+   "accelerated": [],
+   "extension": null,
+   "module": "_ail__jellyfish_fast",
+   "python": "3.12.3",
+   "python_file": "_jellyfish.py",
+   "rejected": {
+    "_check_type": "unresolved-param: s stays in CPython",
+    "_jaro_winkler": "unresolved-param: s1, s2, long_tolerance stays in CPython",
+    "_normalize": "unresolved-param: s stays in CPython",
+    "jaro_winkler_similarity": "unresolved-param: s1, s2, long_tolerance stays in CPython",
+    "levenshtein_distance": "unresolved-param: s1, s2 stays in CPython",
+    "soundex": "unresolved-param: s stays in CPython"
+   },
+   "run_file": "_jellyfish_run.py",
+   "schema": "ail.cpython_hybrid/2",
+   "source": "/tmp/wedge3c-_uqoj086/hybrid-src-1sxnz2zp/_jellyfish.py"
+  },
+  "build_observed": {
+   "accelerated": [
+    "_normalize"
+   ],
+   "extension": "_ail__jellyfish_fast.cpython-312-x86_64-linux-gnu.so",
+   "module": "_ail__jellyfish_fast",
+   "python": "3.12.3",
+   "python_file": "_jellyfish.py",
+   "rejected": {
+    "_check_type": "unresolved-return: no return, or contradictory returns stays in CPython",
+    "_jaro_winkler": "unresolved-return: return branches require distinct tags stays in CPython",
+    "jaro_winkler_similarity": "unresolved-return: return branches require distinct tags stays in CPython",
+    "levenshtein_distance": "unresolved-return: return branches require distinct tags stays in CPython",
+    "soundex": "unresolved-return: return branches require distinct tags stays in CPython"
+   },
+   "run_file": "_jellyfish_run.py",
+   "schema": "ail.cpython_hybrid/2",
+   "source": "/tmp/wedge3c-_uqoj086/hybrid-src-smerxj4q/_jellyfish.py"
+  },
+  "times": {
+   "cpython": 2.892541,
+   "pypy": 0.528866,
+   "hybrid": 2.838839,
+   "hybrid_obs": 2.840405,
+   "native": 0.269776
+  },
+  "instructions": {},
+  "match": {
+   "cpython": true,
+   "pypy": true,
+   "hybrid": true,
+   "hybrid_obs": true,
+   "native": true
+  },
+  "output_sha": {
+   "cpython": "1a00582dd527b968f7dc1eef3c238b50c8436fe30feeab3afa003eccb1d50b9e",
+   "pypy": "1a00582dd527b968f7dc1eef3c238b50c8436fe30feeab3afa003eccb1d50b9e",
+   "hybrid": "1a00582dd527b968f7dc1eef3c238b50c8436fe30feeab3afa003eccb1d50b9e",
+   "hybrid_obs": "1a00582dd527b968f7dc1eef3c238b50c8436fe30feeab3afa003eccb1d50b9e",
+   "native": "1a00582dd527b968f7dc1eef3c238b50c8436fe30feeab3afa003eccb1d50b9e"
+  },
+  "cpython_stdout": "words 386 pairs 150000\nlevenshtein total 887171\njaro_winkler total 58120.765221244044\nsoundex total 350648621\nthe over 3 0.52777777777777779 T000\ndog garcia 6 0.5 D200\njohnson jackson 3 0.74285714285714288 J525\nrodriguez young 7 0.54074074074074074 R362\nthomas hall 5 0.47222222222222215 T520\nthompson edwards 8 0.42261904761904762 T512\nrobinson peterson 5 0.47222222222222215 R152\ntorres wood 5 0.47222222222222215 T620\nbaker long 5 0 B260\ngomez barnes 5 0.45555555555555555 G520\nedwards wallace 7 0.52380952380952384 E363\ncook murray 6 0 C200\n",
+  "profile": {
+   "_jaro_winkler": {
+    "calls": 150000,
+    "self_s": 0.963893,
+    "cum_s": 1.468204
+   },
+   "soundex": {
+    "calls": 150000,
+    "self_s": 0.432851,
+    "cum_s": 0.628831
+   },
+   "levenshtein_distance": {
+    "calls": 150000,
+    "self_s": 1.79328,
+    "cum_s": 2.909411
+   },
+   "jaro_winkler_similarity": {
+    "calls": 150000,
+    "self_s": 0.058453,
+    "cum_s": 1.526656
+   },
+   "<module>": {
+    "calls": 1,
+    "self_s": 9e-06,
+    "cum_s": 0.000365
+   },
+   "_check_type": {
+    "calls": 750000,
+    "self_s": 0.130185,
+    "cum_s": 0.194677
+   },
+   "_normalize": {
+    "calls": 150000,
+    "self_s": 0.031901,
+    "cum_s": 0.057146
+   }
+  },
+  "refusals": [
+   {
+    "reason": "unresolved-param: s1, s2 stays in CPython",
+    "self_s": 1.79328,
+    "calls": 150000,
+    "functions": [
+     "levenshtein_distance"
+    ]
+   },
+   {
+    "reason": "unresolved-param: s1, s2, long_tolerance stays in CPython",
+    "self_s": 1.022346,
+    "calls": 300000,
+    "functions": [
+     "_jaro_winkler",
+     "jaro_winkler_similarity"
+    ]
+   },
+   {
+    "reason": "unresolved-param: s stays in CPython",
+    "self_s": 0.594937,
+    "calls": 1050000,
+    "functions": [
+     "_check_type",
+     "_normalize",
+     "soundex"
+    ]
+   }
+  ],
+  "observed_refusals": [
+   {
+    "reason": "unresolved-return: return branches require distinct tags stays in CPython",
+    "self_s": 3.248477,
+    "calls": 600000,
+    "functions": [
+     "_jaro_winkler",
+     "jaro_winkler_similarity",
+     "levenshtein_distance",
+     "soundex"
+    ]
+   },
+   {
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython",
+    "self_s": 0.130185,
+    "calls": 750000,
+    "functions": [
+     "_check_type"
+    ]
+   },
+   {
+    "reason": "selected by the build",
+    "self_s": 0.031901,
+    "calls": 150000,
+    "functions": [
+     "_normalize"
+    ]
+   }
+  ]
+ },
+ {
+  "library": "msgpack",
+  "package": "msgpack",
+  "hot_module": "fallback.py",
+  "functions_total": 35,
+  "functions_top_level": 3,
+  "native_functions": 0,
+  "selected_helpers": [],
+  "selected_helpers_observed": [],
+  "build_plain": {
+   "accelerated": [],
+   "extension": null,
+   "module": "_ail_fallback_fast",
+   "python": "3.12.3",
+   "python_file": "fallback.py",
+   "rejected": {
+    "Packer.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+    "Packer._pack": "a decorated, dunder or non-plain-signature method stays in CPython",
+    "Packer._pack_array_header": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer._pack_bin_header": "method: field self._use_bin_type has no scalar or int/float list kind, stays in CPython",
+    "Packer._pack_map_header": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer._pack_map_pairs": "a decorated, dunder or non-plain-signature method stays in CPython",
+    "Packer._pack_raw_header": "method: field self._use_bin_type has no scalar or int/float list kind, stays in CPython",
+    "Packer.bytes": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer.getbuffer": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer.pack": "method: field self._autoreset has no scalar or int/float list kind, stays in CPython",
+    "Packer.pack_array_header": "method: field self._autoreset has no scalar or int/float list kind, stays in CPython",
+    "Packer.pack_ext_type": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer.pack_map_header": "method: field self._autoreset has no scalar or int/float list kind, stays in CPython",
+    "Packer.pack_map_pairs": "method: field self._autoreset has no scalar or int/float list kind, stays in CPython",
+    "Packer.reset": "method: self is stored to or used other than by reading an attribute (field write-back is opt-in: AIL_HYBRID_FIELD_STORES=1), stays in CPython",
+    "Unpacker.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.__iter__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.__next__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._consume": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._get_extradata": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._got_extradata": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._read": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._read_header": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._reserve": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._unpack": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.feed": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.read_array_header": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.read_bytes": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.read_map_header": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.skip": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.tell": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.unpack": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "_check_type_strict": "not a typed candidate, stays in CPython",
+    "_get_data_from_buffer": "not a typed candidate, stays in CPython",
+    "unpackb": "not a typed candidate, stays in CPython"
+   },
+   "run_file": "fallback_run.py",
+   "schema": "ail.cpython_hybrid/2",
+   "source": "/tmp/wedge3c-_uqoj086/hybrid-src-ema8jw4t/fallback.py"
+  },
+  "build_observed": {
+   "accelerated": [],
+   "extension": null,
+   "module": "_ail_fallback_fast",
+   "python": "3.12.3",
+   "python_file": "fallback.py",
+   "rejected": {
+    "Packer.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+    "Packer._pack": "a decorated, dunder or non-plain-signature method stays in CPython",
+    "Packer._pack_array_header": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer._pack_bin_header": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer._pack_map_header": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer._pack_map_pairs": "a decorated, dunder or non-plain-signature method stays in CPython",
+    "Packer._pack_raw_header": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer.bytes": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer.getbuffer": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer.pack": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer.pack_array_header": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer.pack_ext_type": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer.pack_map_header": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer.pack_map_pairs": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "Packer.reset": "method: self is stored to or used other than by reading an attribute (field write-back is opt-in: AIL_HYBRID_FIELD_STORES=1), stays in CPython",
+    "Unpacker.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.__iter__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.__next__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._consume": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._get_extradata": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._got_extradata": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._read": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._read_header": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._reserve": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker._unpack": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.feed": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.read_array_header": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.read_bytes": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.read_map_header": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.skip": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.tell": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "Unpacker.unpack": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "_check_type_strict": "not a typed candidate, stays in CPython",
+    "_get_data_from_buffer": "not a typed candidate, stays in CPython",
+    "unpackb": "not a typed candidate, stays in CPython"
+   },
+   "run_file": "fallback_run.py",
+   "schema": "ail.cpython_hybrid/2",
+   "source": "/tmp/wedge3c-_uqoj086/hybrid-src-bx2z3qf9/fallback.py"
+  },
+  "times": {
+   "cpython": 2.222846,
+   "pypy": 0.6729,
+   "hybrid": 2.208597,
+   "hybrid_obs": 2.211046,
+   "native": 0.157129
+  },
+  "instructions": {},
+  "match": {
+   "cpython": true,
+   "pypy": true,
+   "hybrid": true,
+   "hybrid_obs": true,
+   "native": true
+  },
+  "output_sha": {
+   "cpython": "f1bf0cb8ebede6b0c4bcca268f244760fdfa56fbdc907e97c750a638da8218f2",
+   "pypy": "f1bf0cb8ebede6b0c4bcca268f244760fdfa56fbdc907e97c750a638da8218f2",
+   "hybrid": "f1bf0cb8ebede6b0c4bcca268f244760fdfa56fbdc907e97c750a638da8218f2",
+   "hybrid_obs": "f1bf0cb8ebede6b0c4bcca268f244760fdfa56fbdc907e97c750a638da8218f2",
+   "native": "f1bf0cb8ebede6b0c4bcca268f244760fdfa56fbdc907e97c750a638da8218f2"
+  },
+  "cpython_stdout": "records 400 rounds 110\npacked bytes 44919\nsha256 f50be9674126d82ad1d20ea412111ad85c48ff1b21e088b0fa22a695bda7656f\nfirst b'\\x83\\xa7version\\x01\\xa7records\\xdc\\x01\\x90\\x88\\xa2i'\nlast b'\\xc0\\xc2\\xc3\\xcb@\\x0c\\x00\\x00\\x00\\x00\\x00\\x00\\xa3end'\ntail [None, False, True, 3.5, 'end']\n",
+  "profile": {
+   "<module>": {
+    "calls": 1,
+    "self_s": 1.6e-05,
+    "cum_s": 5e-05
+   },
+   "Unpacker.feed": {
+    "calls": 110,
+    "self_s": 0.000227,
+    "cum_s": 0.00105
+   },
+   "Unpacker.__init__": {
+    "calls": 110,
+    "self_s": 0.000417,
+    "cum_s": 0.000669
+   },
+   "Unpacker._reserve": {
+    "calls": 2483910,
+    "self_s": 0.529795,
+    "cum_s": 0.725739
+   },
+   "Packer._pack_array_header": {
+    "calls": 132220,
+    "self_s": 0.050402,
+    "cum_s": 0.085548
+   },
+   "Unpacker._read_header": {
+    "calls": 1453320,
+    "self_s": 1.003016,
+    "cum_s": 2.241194
+   },
+   "Unpacker._unpack": {
+    "calls": 1453320,
+    "self_s": 1.545014,
+    "cum_s": 4.170611
+   },
+   "Packer._pack": {
+    "calls": 1453320,
+    "self_s": 2.000553,
+    "cum_s": 4.204328
+   },
+   "Packer._pack_map_header": {
+    "calls": 132110,
+    "self_s": 0.050896,
+    "cum_s": 0.086491
+   },
+   "Packer._pack_raw_header": {
+    "calls": 748440,
+    "self_s": 0.273142,
+    "cum_s": 0.46806
+   },
+   "Packer._pack_bin_header": {
+    "calls": 44000,
+    "self_s": 0.020656,
+    "cum_s": 0.035148
+   },
+   "Packer.__init__": {
+    "calls": 110,
+    "self_s": 0.000226,
+    "cum_s": 0.000226
+   },
+   "<lambda>": {
+    "calls": 132220,
+    "self_s": 0.014842,
+    "cum_s": 0.014842
+   },
+   "Unpacker._read": {
+    "calls": 792440,
+    "self_s": 0.398609,
+    "cum_s": 0.681234
+   },
+   "Packer._pack_map_pairs": {
+    "calls": 132110,
+    "self_s": 0.347108,
+    "cum_s": 4.203489
+   },
+   "Packer": {
+    "calls": 1,
+    "self_s": 5e-06,
+    "cum_s": 5e-06
+   },
+   "unpackb": {
+    "calls": 110,
+    "self_s": 0.00094,
+    "cum_s": 4.173346
+   },
+   "_get_data_from_buffer": {
+    "calls": 110,
+    "self_s": 0.000227,
+    "cum_s": 0.000227
+   },
+   "Unpacker._got_extradata": {
+    "calls": 110,
+    "self_s": 4.4e-05,
+    "cum_s": 5.6e-05
+   },
+   "Unpacker": {
+    "calls": 1,
+    "self_s": 3e-06,
+    "cum_s": 3e-06
+   },
+   "Packer.pack": {
+    "calls": 110,
+    "self_s": 0.000353,
+    "cum_s": 4.204761
+   }
+  },
+  "refusals": [
+   {
+    "reason": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "self_s": 3.477122,
+    "calls": 6183320,
+    "functions": [
+     "Unpacker.__init__",
+     "Unpacker._got_extradata",
+     "Unpacker._read",
+     "Unpacker._read_header",
+     "Unpacker._reserve",
+     "Unpacker._unpack",
+     "Unpacker.feed"
+    ]
+   },
+   {
+    "reason": "a decorated, dunder or non-plain-signature method stays in CPython",
+    "self_s": 2.347887,
+    "calls": 1585540,
+    "functions": [
+     "Packer.__init__",
+     "Packer._pack",
+     "Packer._pack_map_pairs"
+    ]
+   },
+   {
+    "reason": "method: field self._use_bin_type has no scalar or int/float list kind, stays in CPython",
+    "self_s": 0.293798,
+    "calls": 792440,
+    "functions": [
+     "Packer._pack_bin_header",
+     "Packer._pack_raw_header"
+    ]
+   },
+   {
+    "reason": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "self_s": 0.101298,
+    "calls": 264330,
+    "functions": [
+     "Packer._pack_array_header",
+     "Packer._pack_map_header"
+    ]
+   },
+   {
+    "reason": "not reported by the build",
+    "self_s": 0.01485,
+    "calls": 132222,
+    "functions": [
+     "<lambda>",
+     "Packer",
+     "Unpacker"
+    ]
+   },
+   {
+    "reason": "not a typed candidate, stays in CPython",
+    "self_s": 0.001167,
+    "calls": 220,
+    "functions": [
+     "_get_data_from_buffer",
+     "unpackb"
+    ]
+   },
+   {
+    "reason": "method: field self._autoreset has no scalar or int/float list kind, stays in CPython",
+    "self_s": 0.000353,
+    "calls": 110,
+    "functions": [
+     "Packer.pack"
+    ]
+   }
+  ],
+  "observed_refusals": [
+   {
+    "reason": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+    "self_s": 3.477122,
+    "calls": 6183320,
+    "functions": [
+     "Unpacker.__init__",
+     "Unpacker._got_extradata",
+     "Unpacker._read",
+     "Unpacker._read_header",
+     "Unpacker._reserve",
+     "Unpacker._unpack",
+     "Unpacker.feed"
+    ]
+   },
+   {
+    "reason": "a decorated, dunder or non-plain-signature method stays in CPython",
+    "self_s": 2.347887,
+    "calls": 1585540,
+    "functions": [
+     "Packer.__init__",
+     "Packer._pack",
+     "Packer._pack_map_pairs"
+    ]
+   },
+   {
+    "reason": "method: field self._buffer has no scalar or int/float list kind, stays in CPython",
+    "self_s": 0.395449,
+    "calls": 1056880,
+    "functions": [
+     "Packer._pack_array_header",
+     "Packer._pack_bin_header",
+     "Packer._pack_map_header",
+     "Packer._pack_raw_header",
+     "Packer.pack"
+    ]
+   },
+   {
+    "reason": "not reported by the build",
+    "self_s": 0.01485,
+    "calls": 132222,
+    "functions": [
+     "<lambda>",
+     "Packer",
+     "Unpacker"
+    ]
+   },
+   {
+    "reason": "not a typed candidate, stays in CPython",
+    "self_s": 0.001167,
+    "calls": 220,
+    "functions": [
+     "_get_data_from_buffer",
+     "unpackb"
+    ]
+   }
+  ]
+ }
+]
