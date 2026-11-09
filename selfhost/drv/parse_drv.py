@@ -37,9 +37,7 @@ def dump_file(path):
     f.close()
     try:
         return ailast.dump(ailparse.parse(text))
-    except SyntaxError as e:
-        return "!! refused: " + str(e)
-    except ailparse.ParseError as e:
+    except Exception as e:
         return "!! refused: " + str(e)
 
 

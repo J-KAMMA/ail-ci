@@ -135,21 +135,47 @@ Counts from `ast` over the 376 files; a construct with no occurrence is refused 
 | `AnnAssign` / without value / `simple=0` | 342 / 24 / 9 | `AugAssign` | 2171 |
 | `NamedExpr` | 5 | `Constant` / bytes / ellipsis | 100502 / 137 / 1 |
 
-Constructs with **zero** S376 occurrences are refused by name rather than built: `match`/`case`,
-3.12 `type X = ...`, and generic `def f[T]`/`class C[T]` type parameters.  `async def`, `async for`,
-`async with`, `await` and `except*` are implemented with local node classes in `ailparse.py`
-(`ailast.py` has no such classes), but none occurs in S376, so they are not counted as moving the
-number.
+Constructs with **zero** S376 occurrences are refused by name rather than built: a `match`/`case`
+statement (`ailparse: match statement not supported`), a 3.12 `type X = ...` alias
+(`ailparse: type alias not supported`), and generic `def f[T]`/`class C[T]` type parameters
+(`ailparse: type parameters not supported`).  The `match` and `type` tests look at the following
+tokens, so `match = 1`, `match(x)`, `match: int = 1`, `type = 5` and `type(x)` stay ordinary
+statements.  `async def`, `async for`, `async with`, `await` and `except*` are implemented with local
+node classes in `ailparse.py` (`ailast.py` has no such classes), but none occurs in S376, so they are
+not counted as moving the number.
 
 ## Errors
 
-`parse` raises `SyntaxError` where `ast.parse` does.  `AIL_CURRENT/test_ail_selfhost_parse.py` has 20
-fixed snippets (5 legal, 15 rejected) and checks only error versus no error; the message text
-differs and is not compared.  Result: **20/20 agree**.  `return` and `yield` at module level are not
-errors for `ast.parse` and are accepted here as well.
+`parse` raises `SyntaxError` where `ast.parse` does.  A simple line now requires a real terminator
+(`NEWLINE`, `;`, or end of input), so `x y`, `1 2`, `print() print()` and `x = 1 y = 2` are refused;
+an annotated target must be a name, attribute or subscript (`a, b: int = 1, 2` is refused); an
+augmented target may not be a tuple/list; `from . import ()` is refused; and `except` may not be
+mixed with `except*` in one `try`.  Parentheses now decide the `AnnAssign.simple` flag, so
+`(x): int = 1` has `simple=0` while `x: int = 1` has `simple=1`.
+
+`AIL_CURRENT/test_ail_selfhost_parse.py` has 20 fixed snippets (5 legal, 15 rejected) and checks only
+error versus no error; the message text differs and is not compared.  Result: **20/20 agree**.  A
+second set of reviewer boundary cases (13 legal, 8 rejected, 5 named refusals) is checked the same
+way.  `return` and `yield` at module level are not errors for `ast.parse` and are accepted here as
+well.
+
+## Stage 2
+
+`selfhost/drv/parse_drv.py` now builds (general path, as the `ailast` class attributes still force
+it).  Against stage 1 it prints byte-identical output for **373/376** files with the default int64
+build.  The three remaining files contain integer literals above int64
+(`AIL_CURRENT/python/pkg-v12/pyboxed.py`, `pyboxed2.py`, and
+`lab/compare/src/chain_relax/main.py`); AIL stops loudly there, which is the allowed behaviour when
+the value cannot be computed.  Compiling the same driver with `--exact-int` makes stage 2 print
+**376/376** identical.
+
+The driver catches `Exception` rather than `SyntaxError`, because AIL's subset cannot catch the
+builtin `SyntaxError` type.  `ailparse.parse` still raises `SyntaxError` on CPython: the raising
+helper is redefined in a block AIL's checker ignores, while AIL compiles a no-op placeholder that a
+valid input never reaches.
 
 ## Test
 
 The existing stage 1 expression tests still pass, and the test module now also parses 30 fixed S376
-files and compares the dump with `ast.parse`, plus the 20 snippets.  All 7 tests pass in about 65 s,
-including the existing stage 2 expression build.
+files and compares the dump with `ast.parse`, plus the 20 snippets and the boundary cases.  It also
+builds `parse_drv.py` and checks the 30 files at stage 2 against stage 1.  All 9 tests pass.

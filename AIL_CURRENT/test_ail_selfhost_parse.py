@@ -78,6 +78,42 @@ SNIPPETS = [
     "from import x\n",
 ]
 
+# Reviewer boundary cases.  BOUNDARY_VALID must dump like `ast.parse`; BOUNDARY_INVALID must be
+# rejected where `ast.parse` rejects it, and BOUNDARY_REFUSED names constructs this step refuses by
+# name although CPython accepts them (they have zero occurrences in S376).
+BOUNDARY_VALID = [
+    "del a, b[0], c.d\n",
+    "del a[0], b.c\n",
+    "del (a, b)\n",
+    "x: int = 1\n",
+    "(x): int = 1\n",
+    "(x): int\n",
+    "a.b: int = 1\n",
+    "a[0]: int = 1\n",
+    "with (): pass\n",
+    "with (a as b, c as d): pass\n",
+    "try:\n    pass\nexcept* E as e:\n    pass\n",
+    "type = 5\n",
+    "type(x)\n",
+]
+BOUNDARY_INVALID = [
+    "x y\n",
+    "1 2\n",
+    "print() print()\n",
+    "x = 1 y = 2\n",
+    "a, b: int = 1, 2\n",
+    "a, b += 1\n",
+    "from . import ()\n",
+    "try:\n    pass\nexcept E:\n    pass\nexcept* F:\n    pass\n",
+]
+BOUNDARY_REFUSED = [
+    "type X = int\n",
+    "type X[T] = int\n",
+    "match x:\n    case 1:\n        pass\n",
+    "def f[T](x):\n    pass\n",
+    "class C[T]:\n    pass\n",
+]
+
 
 def module_dump_ail(path):
     with open(path, encoding="utf-8", newline="") as f:
@@ -270,6 +306,24 @@ class ParseTest(unittest.TestCase):
                     ail_err = True
                 self.assertEqual(ail_err, py_err)
 
+    def test_review_boundaries_stage1(self):
+        for text in BOUNDARY_VALID:
+            with self.subTest(text=text[:60]):
+                self.assertEqual(ailast.dump(ailparse.parse(text)),
+                                 ast.dump(ast.parse(text), include_attributes=False))
+        for text in BOUNDARY_INVALID:
+            with self.subTest(text=text[:60]):
+                with self.assertRaises(SyntaxError):
+                    ast.parse(text)
+                with self.assertRaises(SyntaxError):
+                    ailparse.parse(text)
+        for text in BOUNDARY_REFUSED:
+            with self.subTest(text=text[:60]):
+                ast.parse(text)
+                with self.assertRaises(SyntaxError) as cm:
+                    ailparse.parse(text)
+                self.assertIn("not supported", str(cm.exception))
+
     @unittest.skipUnless(HAVE_CC, "no C compiler")
     def test_stage2_matches_stage1(self):
         texts = corpus_segments(20)
@@ -296,6 +350,28 @@ class ParseTest(unittest.TestCase):
             e2 = run([str(exe), edge_files])
             self.assertEqual(e2.returncode, 0, e2.stderr[-500:])
             self.assertEqual(e2.stdout, e1.stdout)
+
+    @unittest.skipUnless(HAVE_CC, "no C compiler")
+    def test_stage2_modules_match_stage1(self):
+        files = fixed_files()
+        self.assertEqual(len(files), 30)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            exe = tmp / "parse_drv"
+            env = dict(os.environ, AIL_PATH=str(SRC), AIL_NO_CACHE="1")
+            build = run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile",
+                         "selfhost/drv/parse_drv.py", "-o", str(exe)], env)
+            self.assertEqual(build.returncode, 0, build.stderr[-800:])
+            lst = tmp / "files.txt"
+            with open(lst, "w", encoding="utf-8") as f:
+                f.write("\n".join(files) + "\n")
+            s1 = run([sys.executable, "-B", "selfhost/drv/parse_drv.py", str(lst)],
+                     dict(os.environ, PYTHONPATH=str(SRC)))
+            self.assertEqual(s1.returncode, 0, s1.stderr[-500:])
+            s2 = run([str(exe), str(lst)])
+            self.assertEqual(s2.returncode, 0, s2.stderr[-500:])
+            self.assertEqual(s2.stdout, s1.stdout)
+            self.assertEqual(s1.stdout.count(b"\n== ") + 1, 30)
 
 
 if __name__ == "__main__":

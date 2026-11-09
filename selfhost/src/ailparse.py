@@ -1351,7 +1351,28 @@ class Parser:
                 return [self.parse_classdef([])]
             if kw == 'async':
                 return [self.parse_async([])]
+            if kw == 'match' and self.match_statement_ahead():
+                raise ParseError('ailparse: match statement not supported')
         return self.parse_simple_line()
+
+    def match_statement_ahead(self):
+        j = self.i + 1
+        depth = 0
+        seen = False
+        while j < len(self.toks):
+            t = self.toks[j].type
+            if t in ('NEWLINE', 'ENDMARKER', 'SEMI') and depth == 0:
+                return False
+            if t in ('LPAR', 'LSQB', 'LBRACE'):
+                depth += 1
+            elif t in ('RPAR', 'RSQB', 'RBRACE'):
+                depth -= 1
+            elif t == 'COLON' and depth == 0:
+                return seen
+            if t not in ('NL', 'COMMENT'):
+                seen = True
+            j += 1
+        return False
 
     def parse_decorators(self):
         out = []
@@ -1416,6 +1437,8 @@ class Parser:
             break
         if self.at('NEWLINE'):
             self.advance()
+        elif not self.at('ENDMARKER'):
+            raise ParseError('ailparse: expected end of statement not supported')
         return out
 
     def parse_simple_statement(self):
@@ -1464,10 +1487,16 @@ class Parser:
                 return ailast.Assert(test, msg, a, b, c, d)
             if kw == 'del':
                 self.advance()
-                targets = self.parse_star_expressions()
-                self.assign_ctx(targets, ailast.Del())
+                targets = self.parse_del_targets()
+                k = 0
+                while k < len(targets):
+                    self.assign_ctx(targets[k], ailast.Del())
+                    k += 1
                 a, b, c, d = self._ln(start)
-                return ailast.Delete([targets], a, b, c, d)
+                return ailast.Delete(targets, a, b, c, d)
+            if kw == 'type':
+                if self.is_type_alias_start():
+                    raise ParseError('ailparse: type alias not supported')
             if kw == 'global':
                 self.advance()
                 names = self.parse_name_list()
@@ -1483,6 +1512,27 @@ class Parser:
             if kw == 'from':
                 return self.parse_import_from(start)
         return self.parse_expr_statement(start)
+
+    def parse_del_targets(self):
+        items = [self.parse_star_item()]
+        while self.at('COMMA'):
+            self.advance()
+            self._skip()
+            if self.at_stmt_end():
+                break
+            items.append(self.parse_star_item())
+        return items
+
+    def is_type_alias_start(self):
+        j = self.i + 1
+        while j < len(self.toks) and self.toks[j].type in ('NL', 'COMMENT'):
+            j += 1
+        if j >= len(self.toks) or self.toks[j].type != 'NAME':
+            return False
+        k = j + 1
+        while k < len(self.toks) and self.toks[k].type in ('NL', 'COMMENT'):
+            k += 1
+        return k < len(self.toks) and self.toks[k].type in ('EQUAL', 'LSQB')
 
     def parse_name_list(self):
         out = []
@@ -1572,6 +1622,8 @@ class Parser:
                 self._skip()
                 if self.at_stmt_end():
                     break
+        if len(names) == 0:
+            raise ParseError('ailparse: empty from import not supported')
         a, b, c, d = self._ln(start)
         return ailast.ImportFrom(module, names, level, a, b, c, d)
 
@@ -1825,6 +1877,8 @@ class Parser:
             break
         if not self.at('RPAR'):
             return None
+        if len(items) == 0:
+            return None
         self.advance()
         self._skip()
         if not self.at('COLON'):
@@ -1847,12 +1901,22 @@ class Parser:
         body = self.parse_suite()
         handlers = []
         is_star = False
+        saw_plain = False
+        saw_star = False
         while self.is_name('except'):
             hstart = self.cur()
             self.advance()
-            if self.at('STAR'):
+            this_star = self.at('STAR')
+            if this_star:
+                if saw_plain:
+                    raise ParseError('ailparse: cannot mix except and except* not supported')
                 is_star = True
+                saw_star = True
                 self.advance()
+            else:
+                if saw_star:
+                    raise ParseError('ailparse: cannot mix except and except* not supported')
+                saw_plain = True
             typ = None
             name = None
             if not self.at('COLON'):
@@ -1862,6 +1926,8 @@ class Parser:
                     if not self.at('NAME'):
                         raise ParseError('ailparse: expected an exception name not supported')
                     name = self.advance().string
+            elif this_star:
+                raise ParseError('ailparse: except* without a type not supported')
             hbody = self.parse_suite()
             a, b, c, d = self._ln(hstart)
             handlers.append(ailast.ExceptHandler(typ, name, hbody, a, b, c, d))
@@ -1887,17 +1953,23 @@ class Parser:
     def parse_expr_statement(self, start):
         first = self.parse_star_expressions()
         if self.at('COLON'):
+            if not (isinstance(first, ailast.Name) or isinstance(first, ailast.Attribute)
+                    or isinstance(first, ailast.Subscript)):
+                raise ParseError('ailparse: annotated assignment target not supported')
             self.advance()
             annotation = self.parse_test()
             value = None
             if self.at('EQUAL'):
                 self.advance()
                 value = self.parse_star_expressions()
-            simple = 1 if isinstance(first, ailast.Name) else 0
+            simple = 1 if isinstance(first, ailast.Name) and start.type == 'NAME' else 0
             self.assign_ctx(first, ailast.Store())
             a, b, c, d = self._ln(start)
             return ailast.AnnAssign(first, annotation, value, simple, a, b, c, d)
         if self.is_aug():
+            if not (isinstance(first, ailast.Name) or isinstance(first, ailast.Attribute)
+                    or isinstance(first, ailast.Subscript)):
+                raise ParseError('ailparse: augmented assignment target not supported')
             op = self.aug_op(self.cur().type)
             self.advance()
             value = self.parse_star_expressions()
@@ -2048,23 +2120,28 @@ def parse_expr(text):
     return first
 
 
+def _parse_syntax_error(message):
+    # AIL's subset cannot raise SyntaxError.  Its checker ignores the redefinition below, while
+    # CPython runs it, so ``parse`` raises SyntaxError exactly where ``ast.parse`` does on CPython
+    # and the AIL build only reaches the placeholder on a path a valid input never takes.
+    pass
+
+
 if True:
-    # AIL's subset cannot raise SyntaxError, and the self-hosting expression driver still imports
-    # this module.  A nested def is skipped by AIL's subset checker; CPython defines and runs it,
-    # so ``parse`` raises SyntaxError exactly where ``ast.parse`` does on CPython.
     def _parse_syntax_error(message):
         raise SyntaxError(message)
 
-    def parse(text):
-        """Parse a whole module the way ``ast.parse(text)`` does; attributes are filled in."""
-        try:
-            p = Parser(text, True)
-            body = p.parse_statements()
-            p._skip()
-            if not p.at('ENDMARKER'):
-                raise ParseError('ailparse: trailing tokens not supported')
-            return ailast.Module(body, [])
-        except ParseError as e:
-            _parse_syntax_error(str(e))
-        except ailtok.TokError as e:
-            _parse_syntax_error(str(e))
+
+def parse(text):
+    """Parse a whole module the way ``ast.parse(text)`` does; attributes are filled in."""
+    try:
+        p = Parser(text, True)
+        body = p.parse_statements()
+        p._skip()
+        if not p.at('ENDMARKER'):
+            raise ParseError('ailparse: trailing tokens not supported')
+        return ailast.Module(body, [])
+    except ParseError as e:
+        _parse_syntax_error(str(e))
+    except ailtok.TokError as e:
+        _parse_syntax_error(str(e))
