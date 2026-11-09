@@ -1,8 +1,8 @@
 """Sum of squares over a list[float] parameter.
 
-The hybrid produces no unit for a `list[float]` parameter, so `sum_squares` runs in CPython;
-the program still runs and its output equals CPython's.  Python does the list construction and
-the formatting, and the whole loop stays interpreted.
+Since obs3 the hybrid passes a `list[float]` parameter as the clone's `ail_flist`, so
+`sum_squares` is native (before, it had no unit and ran in CPython).  Python does the list
+construction and the formatting; the output equals CPython's.
 """
 import sys
 
