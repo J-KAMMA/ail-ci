@@ -41,10 +41,11 @@ AIL = REPO / 'AIL_CURRENT' / 'ail_chatgpt.py'
 RESULTS = HERE / 'results.json'
 PROGRAMS = HERE / 'programs'
 AIL_LANGS = ('ail', 'ail-strict', 'ail-new')
-LANGS = ('python', 'rust', 'ail', 'ail-strict', 'ail-new')
-EXT = {'python': '.py', 'rust': '.rs', 'ail': '.py', 'ail-strict': '.py', 'ail-new': '.nw'}
-CODE_TAG = {'python': 'python', 'rust': 'rust', 'ail': 'python', 'ail-strict': 'python', 'ail-new': 'ail'}
-LANG_NAME = {'python': 'Python 3.12', 'rust': 'Rust 2021', 'ail': 'AIL (a Python-syntax language)',
+LANGS = ('python', 'rust', 'go', 'ail', 'ail-strict', 'ail-new')
+EXT = {'python': '.py', 'rust': '.rs', 'go': '.go', 'ail': '.py', 'ail-strict': '.py', 'ail-new': '.nw'}
+CODE_TAG = {'python': 'python', 'rust': 'rust', 'go': 'go', 'ail': 'python', 'ail-strict': 'python', 'ail-new': 'ail'}
+LANG_NAME = {'python': 'Python 3.12', 'rust': 'Rust 2021', 'go': 'Go 1.27',
+             'ail': 'AIL (a Python-syntax language)',
              'ail-strict': 'AIL (a Python-syntax language; strict-path rules in the note)',
              'ail-new': 'AIL-N (the typed surface in the note)'}
 
@@ -59,6 +60,10 @@ LANG_NOTE = {
     'rust': ('Rust 2021, standard library only, no crates. The program is built with '
              '`rustc -O --edition=2021 main.rs` and run as `./main [args...]`; it reads standard '
              'input and writes standard output.'),
+    'go': ('Go 1.27, standard library only, no modules or third-party packages. The program is a '
+           'single file `main.go` with `package main` and `func main()`, built with '
+           '`go build -o main main.go` and run as `./main [args...]`; it reads standard input and '
+           'writes standard output.'),
     'ail': None,   # filled from AIL_FOR_AI.md
     'ail-strict': None,   # filled from lab/vibe2/STRICT_SPEC.md
     'ail-new': None,      # filled from lab/vibe2/NEW_SURFACE.md
@@ -69,15 +74,21 @@ LANG_NOTE = {
 # tasks and cases
 
 def task_list():
-    """(name, directory) for the ten compare-lab tasks plus compare_cand/csv_rollup when present."""
+    """The vibe1 tasks (compare lab plus csv_rollup) and the app-like tasks in lab/vibe/tasks2.
+
+    The new tasks come first so a run cut short by the wall-clock budget still has a complete
+    column for them; the old tasks are there for the delta against vibe1."""
     out = []
-    base = REPO / 'lab' / 'compare' / 'tasks'
-    for p in sorted(base.iterdir()):
-        if (p / 'gen.py').is_file() and (p / 'spec.md').is_file():
-            out.append((p.name, p))
-    cand = REPO / 'lab' / 'compare_cand' / 'tasks' / 'csv_rollup'
-    if (cand / 'gen.py').is_file() and (cand / 'spec.md').is_file():
-        out.append(('csv_rollup', cand))
+    for base, extra in ((HERE / 'tasks2', ()),
+                        (REPO / 'lab' / 'compare' / 'tasks', ()),
+                        (REPO / 'lab' / 'compare_cand' / 'tasks', ('csv_rollup',))):
+        if not base.is_dir():
+            continue
+        for p in sorted(base.iterdir()):
+            if extra and p.name not in extra:
+                continue
+            if (p / 'gen.py').is_file() and (p / 'spec.md').is_file():
+                out.append((p.name, p))
     return out
 
 
@@ -152,18 +163,33 @@ def compile_env(work):
     return env
 
 
+def _limit_mem(lang):
+    """Cap the address space of rust/ail builds at 1.5 GB (the Go runtime reserves a huge
+    virtual range, so it is capped through GOMEMLIMIT instead)."""
+    if lang == 'go' or os.name == 'nt':
+        return None
+    import resource
+
+    def f():
+        resource.setrlimit(resource.RLIMIT_AS, (1500000 * 1024, 1500000 * 1024))
+    return f
+
+
 def build_program(lang, src, work, exe, line_map=None):
     """Compile; python needs no build. Returns ok, seconds, run command, stderr, typed probe."""
     if lang == 'python':
         return dict(ok=True, seconds=0.0, cmd=[sys.executable, '-B', str(src)], stderr='', stdout='', typed=None)
     if lang == 'rust':
         cmd = ['rustc', '-O', '--edition=2021', '-o', str(exe), str(src)]
+    elif lang == 'go':
+        cmd = ['go', 'build', '-o', str(exe), str(src)]
     else:
         cmd = [sys.executable, '-B', str(AIL), 'compile', str(src), '--syntax', 'python', '-o', str(exe)]
     exe.unlink(missing_ok=True)   # AIL refuses to overwrite an existing -o output; a fix round rebuilds
     t0 = time.perf_counter()
     try:
-        p = subprocess.run(cmd, capture_output=True, timeout=BUILD_TIMEOUT, env=compile_env(work))
+        p = subprocess.run(cmd, capture_output=True, timeout=BUILD_TIMEOUT, env=compile_env(work),
+                           preexec_fn=_limit_mem(lang))
         rc, out, err = p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
         rc, out, err = 124, b'', b'(build timeout)'
@@ -288,7 +314,8 @@ def find_opencode():
 class Model:
     def __init__(self, kind, name, timeout, effort=None):
         self.kind, self.name, self.timeout, self.effort = kind, name, timeout, effort
-        self.bin = find_cmd() if kind == 'cmd' else find_opencode()
+        self.bin = (find_cmd() if kind == 'cmd' else
+                    shutil.which('claude') if kind == 'claude' else find_opencode())
         if not self.bin:
             raise SystemExit('no model CLI found for %r (set --cli or VIBE_CMD_BIN)' % kind)
         if kind == 'cmd' and not os.environ.get('COMMAND_CODE_API_KEY'):
@@ -297,6 +324,8 @@ class Model:
     def call(self, prompt, workdir):
         if self.kind == 'cmd':
             return self._cmd(prompt, workdir)
+        if self.kind == 'claude':
+            return self._claude(prompt, workdir)
         return self._opencode(prompt, workdir)
 
     def _cmd(self, prompt, workdir):
@@ -325,11 +354,39 @@ class Model:
             return '', tokens
         return final, tokens
 
+    def _claude(self, prompt, workdir):
+        # Claude Code CLI, one text-only turn: no tools, no settings, no session. The model is
+        # always passed explicitly (vibe3 uses claude-haiku-5-5). Calls are made one at a time.
+        cmd = [self.bin, '-p', '--model', self.name, '--disallowedTools', 'Task,Agent', '--tools', '',
+               '--no-session-persistence', '--setting-sources', '', '--disable-slash-commands',
+               '--strict-mcp-config', '--system-prompt', 'You are a programmer. Answer with one code block.',
+               '--output-format', 'json']
+        if self.effort:
+            cmd += ['--effort', self.effort]
+        rc, raw, err = run_cli(cmd, prompt.encode(), workdir, self.timeout,
+                               workdir / 'model-out.jsonl', workdir / 'model-err.txt')
+        final, tokens = None, 0
+        try:
+            d = json.loads(raw)
+            if isinstance(d, dict):
+                final = d.get('result') or None
+                tokens = int((d.get('usage') or {}).get('output_tokens') or 0)
+        except ValueError:
+            pass
+        if not final:
+            blob = raw[-2000:] + err[-1500:]
+            if FATAL_PAT.search(blob):
+                raise ModelFatal(blob.strip()[-400:])
+            return '', tokens
+        return final, tokens
+
     def _opencode(self, prompt, workdir):
         pf = workdir / 'prompt.txt'
         pf.write_text(prompt)
+        # -f/--file is an array option: a positional message after it would be eaten as another
+        # file, so the message comes first and the attachment last (2026-11-09).
         cmd = [self.bin, 'run', '--format', 'json', '--dir', str(workdir), '-m', self.name,
-               '-f', str(pf), 'Answer the attached prompt. Do not edit files or run commands.']
+               'Answer the attached prompt. Do not edit files or run commands.', '--file', str(pf)]
         rc, raw, err = run_cli(cmd, None, workdir, self.timeout,
                                workdir / 'model-out.jsonl', workdir / 'model-err.txt')
         texts, tokens = [], 0
@@ -741,7 +798,7 @@ def main():
     ap.add_argument('--rounds', type=int, default=MAX_ROUNDS, help='max model attempts per attempt (max 5)')
     ap.add_argument('--jobs', type=int, default=MAX_JOBS)
     ap.add_argument('--minutes', type=float, default=0, help='stop starting new attempts after this many minutes')
-    ap.add_argument('--cli', choices=['cmd', 'opencode'], default=None)
+    ap.add_argument('--cli', choices=['cmd', 'opencode', 'claude'], default=None)
     ap.add_argument('--model', default='deepseek-v4.1-flash')
     ap.add_argument('--effort', default=None, help='cmd reasoning effort (low/medium/high)')
     ap.add_argument('--call-timeout', type=int, default=300)
@@ -761,6 +818,8 @@ def main():
         tasks = [t for t in tasks if t[0] in want]
     seeds = parse_seeds(args.seeds)
     jobs = max(1, min(args.jobs, MAX_JOBS))
+    if os.environ.get('VIBE_CLI') and not args.cli:
+        args.cli = os.environ['VIBE_CLI']
     kind = args.cli or ('cmd' if find_cmd() and os.environ.get('COMMAND_CODE_API_KEY') else 'opencode')
     model = Model(kind, args.model, args.call_timeout, args.effort)
 
