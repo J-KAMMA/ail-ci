@@ -61,3 +61,56 @@ Both programs now compile on the typed path and print the reference's bytes (sec
 
 NumPy differs in the last digits because its sgemm uses another summation order (and FMA), and its `exp` is
 NumPy's own; AIL's digits are the fixed-order ones and equal CPython + the reference.
+
+## 3. Speed (CPU, typed path)
+
+Programs: `bench_mlp.py` / `bench_attn.py` (AIL, default build), `mlp.c` / `attn.c` (plain C, naive loops, sequential
+sums, `gcc -O2`), `mlp_np.py` / `attn_np.py` (NumPy 2.2.6, Windows Python 3.13 on the same laptop; WSL has no NumPy).
+Each program times one forward pass inside itself (the fill is outside the timer): 21 passes for the MLP, 101 for
+attention, median taken; each program run 5 times, the median of the 5 medians reported. Laptop: Inspiron 14 5445,
+WSL2, timing noisy (runs within one set spread up to about 15%; one NumPy run was 5x its median). Instructions:
+`tools/icount.c`, user space, (the program with R passes minus the program with 0 passes) / R.
+
+The AIL output is bit-identical to CPython + the reference in every row (the checksums above); C and NumPy are not
+(other order, NumPy also FMA and its own exp).
+
+| forward pass | AIL before step 3 | AIL after step 3 | C naive -O2 | NumPy, default threads | NumPy, 1 thread |
+| --- | --- | --- | --- | --- | --- |
+| MLP 64x784x512x10, wall | 9.19 ms | **3.20 ms** | 66.1 ms | 0.56 ms | 1.20 ms |
+| MLP, instructions | 82.0M | 47.8M | 181.7M | - | - |
+| attention 128x64, wall | 7.57 ms | **0.430 ms** | 0.641 ms | 0.254 ms | 0.142 ms |
+| attention, instructions | 58.9M | 6.95M | 6.77M | - | - |
+
+Ratios after step 3: MLP AIL is 20.7x faster than naive C, 5.7x slower than NumPy (multi-threaded BLAS) and 2.7x slower
+than NumPy on one thread. Attention: 1.49x faster than naive C, 1.7x slower than NumPy, 3.0x slower than NumPy on one
+thread. (C naive MLP is slow because its inner loop reads `w1` with a stride of 2 KiB.)
+
+What step 3 changed, largest gap first (attention was 11x slower than naive C; per-op instruction counts on 128x128 f32):
+
+| op | before | after | change |
+| --- | --- | --- | --- |
+| `M - col`, `M / col` (broadcast) | 11.6M each | 0.15M | the repeat copy is a C kernel (`ailz_bc`), was a byte loop |
+| `ta.max(M, axis=1, keepdims=True)` | 10.1M | 0.25M | row min/max kernel (`ailz_rext`), was a row copy + f64 view per row |
+| `ta.sum(M, axis=1, keepdims=True)` | 8.8M | 0.07M | row sums with the existing fixed-order reducer (`ailz_rsum`) |
+| `k.T` (128x64) | 5.7M | 0.07M | transpose kernel (`ailz_tr`), was a byte loop |
+| `ta.exp(M)` | 4.3M | 1.36M | `(float)exp((double)x)` in C (`ailz_fn`), the same definition as the f64 path; was three passes through an f64 copy |
+| `ta.maximum(M, 0.0)` (64x512) | 4.9M | (in the 47.8M) | min/max kernel (`ailz_pick`), was three passes through an f64 copy |
+| `ta.matmul` f32 | 1 output at a time | 2 outputs per pass | `ailz_block2`: two columns share the loads of the row, columns tiled; each output runs `ailz_block`'s operations in its order |
+
+Every kernel has a plain-Python definition in the prelude (CPython and the general path run it); the typed path calls
+the C. All are moves, comparisons, or one binary64 libm call rounded once, or the existing 3.5 order, so no output bit
+changes (array_ai_cases match in the default, forced and typed builds; the f32 matmul cases of test_ail_array_core and
+test_ail_array_f32native, including the scalar `-DAILZ_SCALAR` build, still pass).
+
+## 4. What is still missing / next
+
+- **The matmul is the gap to NumPy.** The f32 kernel is 4-wide SSE (the default build has no AVX; `x86-64-v3` is
+  opt-in by owner decision), no FMA (the fixed order forbids it), one thread. The inner loop is 31 instructions per 32
+  multiply-adds, but the whole MLP matmul costs 1.77 instructions per multiply-add (transposing `B` with 4-byte
+  `memcpy`s, the per-output lane tree). Next: a blocked transpose, 4-column blocking with AVX under a runtime CPU
+  check (needs an owner decision: the default stays SSE2), threads over output tiles (the order does not depend on them).
+- `ta.exp` uses binary64 `exp` per element (83 instructions each); a vector f32 exp would change bits, so it belongs to
+  the opt-in inexact mode (TYPED_ARRAY 7), not the default.
+- 2-D f64 axis reductions and broadcasts still use the Python-written loops (correct, slower); 2-D int32 element-wise
+  is still refused; `@`, `ta.softmax`, `mean`, N-D, f16/int8 2-D are not built.
+- Not measured: peak RSS, compile time.

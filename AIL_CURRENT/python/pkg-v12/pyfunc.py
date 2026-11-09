@@ -1462,7 +1462,11 @@ _AIL_SYSINFO = {'_ail_perf_counter': (FLT, 'ail_perf_counter'), '_ail_perf_count
 _AIL_TZ = {'_ail_tz_get': (FLT, 'ailz_get', 'BI'), '_ail_tz_put': (INT, 'ailz_put', 'BIF'),
            '_ail_tz_aa': (INT, 'ailz_aa', 'BBBII'), '_ail_tz_as': (INT, 'ailz_as', 'BBFIII'),
            '_ail_tz_un': (INT, 'ailz_un', 'BBII'), '_ail_tz_fsum': (FLT, 'ailz_fsum', 'BBII'),
-           '_ail_tz_mm': (INT, 'ailz_mm', 'BBBIII'), '_ail_tz_badnan': (INT, 'ailz_badnan', 'BI')}
+           '_ail_tz_mm': (INT, 'ailz_mm', 'BBBIII'), '_ail_tz_badnan': (INT, 'ailz_badnan', 'BI'),
+           # job aicore1: transpose, broadcast copy, exp/log/tanh, row sums and row min/max of 2-D f32 arrays
+           '_ail_tz_tr': (INT, 'ailz_tr', 'BBII'), '_ail_tz_bc': (INT, 'ailz_bc', 'BBIIII'),
+           '_ail_tz_fn': (INT, 'ailz_fn', 'BBII'), '_ail_tz_rsum': (INT, 'ailz_rsum', 'BBII'),
+           '_ail_tz_rext': (INT, 'ailz_rext', 'BBIII'), '_ail_tz_pick': (INT, 'ailz_pick', 'BBBFIII')}
 
 
 def _strip_tz_defs(source):

@@ -1770,6 +1770,86 @@ def _ail_tz_badnan(b: bytearray, n: int) -> int:
     return -1
 
 
+# job aicore1: moves, math functions and row reductions of 2-D f32 arrays (C kernels on the typed path: f32rt.py)
+def _ail_tz_tr(o: bytearray, a: bytearray, r: int, c: int) -> int:
+    # o (c x r) = the transpose of a (r x c)
+    for i in range(r):
+        for j in range(c):
+            src = 4 * (i * c + j)
+            dst = 4 * (j * r + i)
+            o[dst] = a[src]
+            o[dst + 1] = a[src + 1]
+            o[dst + 2] = a[src + 2]
+            o[dst + 3] = a[src + 3]
+    return 0
+
+
+def _ail_tz_bc(o: bytearray, a: bytearray, ar: int, ac: int, r: int, c: int) -> int:
+    # o (r x c) = a (ar x ac) with a dimension of 1 repeated
+    for i in range(r):
+        p = i
+        if ar == 1:
+            p = 0
+        for j in range(c):
+            q = j
+            if ac == 1:
+                q = 0
+            src = 4 * (p * ac + q)
+            dst = 4 * (i * c + j)
+            o[dst] = a[src]
+            o[dst + 1] = a[src + 1]
+            o[dst + 2] = a[src + 2]
+            o[dst + 3] = a[src + 3]
+    return 0
+
+
+def _ail_tz_fn(d: bytearray, a: bytearray, n: int, which: int) -> int:
+    # d = r_f32(f(a)), f the f64 exp (1), log (2) or tanh (3) of _ail_taf_fn
+    t = _AilTAF(n)
+    for k in range(n):
+        t.d[k] = _ail_tz_get(a, k)
+    u = _ail_taf_fn(t, which)
+    for k in range(n):
+        _ail_tz_put(d, k, u.d[k])
+    return 0
+
+
+def _ail_tz_rsum(o: bytearray, a: bytearray, r: int, c: int) -> int:
+    # o[i] = the f32 sum of row i (the order of 3.5), as ta.sum of that row
+    row = bytearray(4 * c)
+    for i in range(r):
+        for t in range(4 * c):
+            row[t] = a[4 * i * c + t]
+        _ail_tz_put(o, i, _ail_tz_fsum(row, row, c, 0))
+    return 0
+
+
+def _ail_tz_rext(o: bytearray, a: bytearray, r: int, c: int, smaller: int) -> int:
+    # o[i] = the min (smaller 1) or max of row i (c > 0), as ta.min / ta.max of that row
+    for i in range(r):
+        t = _AilTAF(c)
+        for k in range(c):
+            t.d[k] = _ail_tz_get(a, i * c + k)
+        _ail_tz_put(o, i, t.d[_ail_taf_extreme(t, smaller != 0, "max")[0]])
+    return 0
+
+
+def _ail_tz_pick(d: bytearray, a: bytearray, b: bytearray, x: float, n: int, smaller: int, bs: int) -> int:
+    # d = minimum (smaller 1) / maximum of a and b, or of a and the f32 scalar x when bs is 1 (_ail_taf_pick_aa / _as)
+    for k in range(n):
+        p = _ail_tz_get(a, k)
+        q = x
+        if bs == 0:
+            q = _ail_tz_get(b, k)
+        v = p
+        if p != p or q != q:
+            v = math.nan
+        elif _ail_ta_fless(q, p) == (smaller != 0):
+            v = q
+        _ail_tz_put(d, k, v)
+    return 0
+
+
 # ---- f32 <-> the binary64 view (for the operations whose result does not depend on the dtype) ---------------------------
 def _ail_tas_v(a: _AilTAS) -> _AilTAF:
     # the elements as an f64 array (a copy: exact, every f32 value is a binary64 value)
@@ -1962,19 +2042,32 @@ def _ail_tas_abs(a: _AilTAS) -> _AilTAS:
 
 def _ail_tas_fn(a: _AilTAS, which: int) -> _AilTAS:
     """r_f32(f(x)) with f the f64 sqrt / exp / log / tanh of T2 (design 3.1)."""
+    out = _AilTAS(a.n)
     if which == 0:
-        out = _AilTAS(a.n)
         _ail_tz_un(out.b, a.b, a.n, 2)
-        return out
-    return _ail_tas_w(_ail_taf_fn(_ail_tas_v(a), which))
+    else:
+        _ail_tz_fn(out.b, a.b, a.n, which)
+    return out
 
 
 def _ail_tas_pick_aa(a: _AilTAS, b: _AilTAS, smaller: bool) -> _AilTAS:
-    return _ail_tas_w(_ail_taf_pick_aa(_ail_tas_v(a), _ail_tas_v(b), smaller))
+    if b.n != a.n:
+        _ail_ta_shapes(a.n, b.n)
+    out = _AilTAS(a.n)
+    s = 0
+    if smaller:
+        s = 1
+    _ail_tz_pick(out.b, a.b, b.b, 0.0, a.n, s, 0)
+    return out
 
 
-def _ail_tas_pick_as(a: _AilTAS, s: float, smaller: bool) -> _AilTAS:
-    return _ail_tas_w(_ail_taf_pick_as(_ail_tas_v(a), _ail_ta_r32(s), smaller))
+def _ail_tas_pick_as(a: _AilTAS, x: float, smaller: bool) -> _AilTAS:
+    out = _AilTAS(a.n)
+    s = 0
+    if smaller:
+        s = 1
+    _ail_tz_pick(out.b, a.b, a.b, _ail_ta_r32(x), a.n, s, 1)
+    return out
 
 
 # ---- f32: reductions (the order of 3.5 with an f32 accumulator) -------------------------------------------------------------
@@ -2584,14 +2677,7 @@ def _ail_tams_copy(a: _AilTAMS) -> _AilTAMS:
 
 def _ail_tams_t(a: _AilTAMS) -> _AilTAMS:
     out = _AilTAMS(a.c, a.r)
-    for i in range(a.r):
-        for j in range(a.c):
-            src = 4 * (i * a.c + j)
-            dst = 4 * (j * a.r + i)
-            out.v.b[dst] = a.v.b[src]
-            out.v.b[dst + 1] = a.v.b[src + 1]
-            out.v.b[dst + 2] = a.v.b[src + 2]
-            out.v.b[dst + 3] = a.v.b[src + 3]
+    _ail_tz_tr(out.v.b, a.v.b, a.r, a.c)
     return out
 
 
@@ -2681,20 +2767,7 @@ def _ail_tams_bc(a: _AilTAMS, r: int, c: int) -> _AilTAMS:
     if a.r == r and a.c == c:
         return a
     out = _AilTAMS(r, c)
-    for i in range(r):
-        p = i
-        if a.r == 1:
-            p = 0
-        for j in range(c):
-            q = j
-            if a.c == 1:
-                q = 0
-            src = 4 * (p * a.c + q)
-            dst = 4 * (i * c + j)
-            out.v.b[dst] = a.v.b[src]
-            out.v.b[dst + 1] = a.v.b[src + 1]
-            out.v.b[dst + 2] = a.v.b[src + 2]
-            out.v.b[dst + 3] = a.v.b[src + 3]
+    _ail_tz_bc(out.v.b, a.v.b, a.r, a.c, r, c)
     return out
 
 
@@ -2773,19 +2846,21 @@ def _ail_tams_rsum(a: _AilTAMS, rows: int) -> _AilTAS:
     # the f32 sum of each row in the order of 3.5 is an f32 value: storing it does not round
     m = _ail_tams_rows(a, rows)
     out = _AilTAS(m.r)
-    for i in range(m.r):
-        _ail_tz_put(out.b, i, _ail_tas_sum(_ail_tams_row(m, i)))
+    _ail_tz_rsum(out.b, m.v.b, m.r, m.c)
     return out
 
 
 def _ail_tams_rext(a: _AilTAMS, rows: int, smaller: bool) -> _AilTAS:
     m = _ail_tams_rows(a, rows)
     out = _AilTAS(m.r)
-    for i in range(m.r):
+    if m.r > 0 and m.c == 0:
         if smaller:
-            _ail_tz_put(out.b, i, _ail_tas_min(_ail_tams_row(m, i)))
-        else:
-            _ail_tz_put(out.b, i, _ail_tas_max(_ail_tams_row(m, i)))
+            raise ValueError("min() iterable argument is empty")
+        raise ValueError("max() iterable argument is empty")
+    s = 0
+    if smaller:
+        s = 1
+    _ail_tz_rext(out.b, m.v.b, m.r, m.c, s)
     return out
 
 
