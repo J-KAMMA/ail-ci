@@ -5,6 +5,9 @@ name: platforms
 # representative set of test modules listed in lab/platforms/config.json; what a platform skips, and
 # why, is in the same file and is printed in each job's summary. A manual run can pass `all` to run
 # every module of ail_check.MODULES (the listed tuple plus tests.d/) instead (long: use it for a rare full check).
+#
+# The wheel install check that runs on Linux, macOS and Windows is .github/workflows/platforms-wheel.yml,
+# which has its own narrow paths so an AIL_CURRENT-only integ pull request starts neither workflow.
 on:
   workflow_dispatch:
     inputs:
@@ -13,7 +16,7 @@ on:
         type: boolean
         default: false
   pull_request:
-    branches: [main]   # not the integration gate (2026-10-25)
+    branches: [main, integ]   # integ starts this workflow but skips every job; not the integration gate
     paths:
       - 'AIL_CURRENT/**'
       - 'lab/platforms/**'
@@ -29,6 +32,7 @@ concurrency:
 jobs:
   platform:
     name: ${{ matrix.platform }} shard ${{ matrix.shard }}/${{ matrix.shards }}
+    if: github.event_name != 'pull_request' || github.base_ref == 'main'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ inputs.all && 350 || 75 }}
     strategy:
@@ -83,6 +87,7 @@ jobs:
     # page switch in ail_wincon.c, to a console. GitHub runners have no console, so this job proves
     # the redirected path (UTF-8 bytes, LF -> CRLF like CPython's sys.stdout) and the Unicode build.
     name: windows utf-8 output
+    if: github.event_name != 'pull_request' || github.base_ref == 'main'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
