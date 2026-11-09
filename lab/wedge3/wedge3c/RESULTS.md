@@ -118,7 +118,7 @@ requested, but the kernel forbids it here.
 ## 5. Probes (mandatory self-check)
 
 Probes are kept in `probes/`; each prints deterministic output over empty, equal, long, numeric,
-punctuation, list-item, dict-value and argument-channel inputs.
+negative, punctuation, list-item, dict-value, attribute and argument-channel inputs.
 
 | probe | CPython pure | PyPy pure | hybrid | native | `cmp.sh` |
 | --- | --- | --- | --- | --- | --- |

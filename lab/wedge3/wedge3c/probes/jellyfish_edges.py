@@ -10,3 +10,11 @@ d = {"a": "abc", "b": "abd"}
 lst = [("x", "y"), ("abc", "abd")]
 print("dict", j.levenshtein_distance(d["a"], d["b"]))
 print("list", j.levenshtein_distance(*lst[1]))
+class Box:
+    pass
+
+
+box = Box()
+box.a, box.b = "abc", "abd"
+print("attr", j.levenshtein_distance(box.a, box.b), repr(j.jaro_winkler_similarity(box.a, box.b)),
+      repr(j.soundex(box.a)))
