@@ -44,7 +44,7 @@ AIL_LANGS = ('ail', 'ail-strict', 'ail-new')
 LANGS = ('python', 'rust', 'go', 'ail', 'ail-strict', 'ail-new')
 EXT = {'python': '.py', 'rust': '.rs', 'go': '.go', 'ail': '.py', 'ail-strict': '.py', 'ail-new': '.nw'}
 CODE_TAG = {'python': 'python', 'rust': 'rust', 'go': 'go', 'ail': 'python', 'ail-strict': 'python', 'ail-new': 'ail'}
-LANG_NAME = {'python': 'Python 3.12', 'rust': 'Rust 2021', 'go': 'Go 1.24',
+LANG_NAME = {'python': 'Python 3.12', 'rust': 'Rust 2021', 'go': 'Go 1.27',
              'ail': 'AIL (a Python-syntax language)',
              'ail-strict': 'AIL (a Python-syntax language; strict-path rules in the note)',
              'ail-new': 'AIL-N (the typed surface in the note)'}
@@ -60,7 +60,7 @@ LANG_NOTE = {
     'rust': ('Rust 2021, standard library only, no crates. The program is built with '
              '`rustc -O --edition=2021 main.rs` and run as `./main [args...]`; it reads standard '
              'input and writes standard output.'),
-    'go': ('Go 1.24, standard library only, no modules or third-party packages. The program is a '
+    'go': ('Go 1.27, standard library only, no modules or third-party packages. The program is a '
            'single file `main.go` with `package main` and `func main()`, built with '
            '`go build -o main main.go` and run as `./main [args...]`; it reads standard input and '
            'writes standard output.'),
@@ -163,6 +163,18 @@ def compile_env(work):
     return env
 
 
+def _limit_mem(lang):
+    """Cap the address space of rust/ail builds at 1.5 GB (the Go runtime reserves a huge
+    virtual range, so it is capped through GOMEMLIMIT instead)."""
+    if lang == 'go' or os.name == 'nt':
+        return None
+    import resource
+
+    def f():
+        resource.setrlimit(resource.RLIMIT_AS, (1500000 * 1024, 1500000 * 1024))
+    return f
+
+
 def build_program(lang, src, work, exe, line_map=None):
     """Compile; python needs no build. Returns ok, seconds, run command, stderr, typed probe."""
     if lang == 'python':
@@ -176,7 +188,8 @@ def build_program(lang, src, work, exe, line_map=None):
     exe.unlink(missing_ok=True)   # AIL refuses to overwrite an existing -o output; a fix round rebuilds
     t0 = time.perf_counter()
     try:
-        p = subprocess.run(cmd, capture_output=True, timeout=BUILD_TIMEOUT, env=compile_env(work))
+        p = subprocess.run(cmd, capture_output=True, timeout=BUILD_TIMEOUT, env=compile_env(work),
+                           preexec_fn=_limit_mem(lang))
         rc, out, err = p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
         rc, out, err = 124, b'', b'(build timeout)'
@@ -301,7 +314,8 @@ def find_opencode():
 class Model:
     def __init__(self, kind, name, timeout, effort=None):
         self.kind, self.name, self.timeout, self.effort = kind, name, timeout, effort
-        self.bin = find_cmd() if kind == 'cmd' else find_opencode()
+        self.bin = (find_cmd() if kind == 'cmd' else
+                    shutil.which('claude') if kind == 'claude' else find_opencode())
         if not self.bin:
             raise SystemExit('no model CLI found for %r (set --cli or VIBE_CMD_BIN)' % kind)
         if kind == 'cmd' and not os.environ.get('COMMAND_CODE_API_KEY'):
@@ -310,6 +324,8 @@ class Model:
     def call(self, prompt, workdir):
         if self.kind == 'cmd':
             return self._cmd(prompt, workdir)
+        if self.kind == 'claude':
+            return self._claude(prompt, workdir)
         return self._opencode(prompt, workdir)
 
     def _cmd(self, prompt, workdir):
@@ -331,6 +347,32 @@ class Model:
                     usage = e.get('usage') or {}
                     if isinstance(usage, dict):
                         tokens += int(usage.get('outputTokens') or 0)
+        if not final:
+            blob = raw[-2000:] + err[-1500:]
+            if FATAL_PAT.search(blob):
+                raise ModelFatal(blob.strip()[-400:])
+            return '', tokens
+        return final, tokens
+
+    def _claude(self, prompt, workdir):
+        # Claude Code CLI, one text-only turn: no tools, no settings, no session. The model is
+        # always passed explicitly (vibe3 uses claude-haiku-5-5). Calls are made one at a time.
+        cmd = [self.bin, '-p', '--model', self.name, '--disallowedTools', 'Task,Agent', '--tools', '',
+               '--no-session-persistence', '--setting-sources', '', '--disable-slash-commands',
+               '--strict-mcp-config', '--system-prompt', 'You are a programmer. Answer with one code block.',
+               '--output-format', 'json']
+        if self.effort:
+            cmd += ['--effort', self.effort]
+        rc, raw, err = run_cli(cmd, prompt.encode(), workdir, self.timeout,
+                               workdir / 'model-out.jsonl', workdir / 'model-err.txt')
+        final, tokens = None, 0
+        try:
+            d = json.loads(raw)
+            if isinstance(d, dict):
+                final = d.get('result') or None
+                tokens = int((d.get('usage') or {}).get('output_tokens') or 0)
+        except ValueError:
+            pass
         if not final:
             blob = raw[-2000:] + err[-1500:]
             if FATAL_PAT.search(blob):
@@ -756,7 +798,7 @@ def main():
     ap.add_argument('--rounds', type=int, default=MAX_ROUNDS, help='max model attempts per attempt (max 5)')
     ap.add_argument('--jobs', type=int, default=MAX_JOBS)
     ap.add_argument('--minutes', type=float, default=0, help='stop starting new attempts after this many minutes')
-    ap.add_argument('--cli', choices=['cmd', 'opencode'], default=None)
+    ap.add_argument('--cli', choices=['cmd', 'opencode', 'claude'], default=None)
     ap.add_argument('--model', default='deepseek-v4.1-flash')
     ap.add_argument('--effort', default=None, help='cmd reasoning effort (low/medium/high)')
     ap.add_argument('--call-timeout', type=int, default=300)
@@ -776,6 +818,8 @@ def main():
         tasks = [t for t in tasks if t[0] in want]
     seeds = parse_seeds(args.seeds)
     jobs = max(1, min(args.jobs, MAX_JOBS))
+    if os.environ.get('VIBE_CLI') and not args.cli:
+        args.cli = os.environ['VIBE_CLI']
     kind = args.cli or ('cmd' if find_cmd() and os.environ.get('COMMAND_CODE_API_KEY') else 'opencode')
     model = Model(kind, args.model, args.call_timeout, args.effort)
 
