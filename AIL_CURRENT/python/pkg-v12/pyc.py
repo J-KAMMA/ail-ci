@@ -1180,7 +1180,8 @@ def _source_line_marker(line):
 
 
 def _fallback_message(reason, location=None):
-    return 'note: %sbuilt on the general path (about 20x slower) because %s; run with --strict to see why' % (
+    return ('note: %sbuilt on the general path (about 20x slower); this did not block the build, '
+            'the program still runs; because %s; run with --strict to see why') % (
         location + ': ' if location else '', ' '.join(str(reason).split()).rstrip(';'))
 
 

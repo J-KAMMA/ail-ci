@@ -257,7 +257,7 @@ class FallbackNote(Base):
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stderr.splitlines()
         self.assertEqual(len(lines), 1, result.stderr)
-        self.assertRegex(lines[0], r'^note: prog\.ail:3:\d+: built on the general path \(about 20x slower\) because ')
+        self.assertRegex(lines[0], r'^note: prog\.ail:3:\d+: built on the general path \(about 20x slower\); this did not block the build, the program still runs; because ')
         self.assertTrue(lines[0].endswith('; run with --strict to see why'), lines[0])
         ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
         self.assertEqual((ran.returncode, ran.stdout, ran.stderr), (0, '3\n', ''))

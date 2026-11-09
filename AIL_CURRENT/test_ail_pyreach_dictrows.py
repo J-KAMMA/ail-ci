@@ -298,7 +298,7 @@ class PyreachDictRows(unittest.TestCase):
                 self.assertEqual(got.returncode, reference.returncode)
                 self.assertEqual(got.stdout, reference.stdout)
             else:
-                self.assertIn('dict of containers', result.stderr)
+                self.assertIn('is a dict whose values', result.stderr)
                 self.assertNotIn('wrapped', result.stderr)
 
     def test_alias_survives_del(self):
