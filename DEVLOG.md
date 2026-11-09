@@ -1,3 +1,32 @@
+## 2026-11-08 -- pypy1: PyPy arm in compare_rival and wedge (job-pypy1-11090337; branch job-pypy1-11090659)
+
+Measurement only, no compiler change.  `lab/compare_rival/run.py` gains a `pypy` row per task
+(`src/<task>/main.py`, prebuilt **PyPy 7.3.23 / Python 3.11.15**, tarball pinned with its published
+sha256 in `toolchains.env`): compile time is `-`, the build-disk cell is the interpreter install
+marked `interpreter`, and a `warm5` column (`pypy_warm.py`, the 5th run inside one process) sits next
+to the plain cold wall time.  `lab/wedge/measure.py` runs each corpus `run.py` under PyPy five times
+and compares every stdout byte with the committed CPython oracle; `report.py` renders PyPy/CPython,
+hybrid/PyPy and standalone/PyPy.
+
+Results.  Wedge: PyPy/CPython **0.159x**, hybrid/PyPy **6.197x** (0/15 modules faster), standalone/PyPy
+**0.829x** (8/13); PyPy output byte-identical on **15/15**.  compare_rival: AIL typed/main vs PyPy
+**9/10** wins, **0.313x** on the plain cold column; against `warm5` **8/10**, geomean **0.430x**, so the
+cold headline is the harsher comparison for PyPy (the report now says both).
+
+Fix pass (review 1): `render()` emitted a 12-column separator and `build refused` row under an
+11-column header (11 under 10 without PyPy) -- both now match the header, and `RESULTS.md` was
+regenerated from `results.json`.  `TOOLCHAIN` now maps `pypy` to the interpreter version, so
+`layer_base` keeps a measured PyPy row when this run has no interpreter instead of overwriting it
+with a failed build and claiming `source: 'this run'`.  `_first_diff` reports a trailing-newline-only
+difference (it returned `None` because `splitlines()` hid it), so `pypy_diff` is never null on a
+mismatch.  Manifest regenerated; `update_manifest.py --check` is clean.
+
+Probes `/tmp/probes_pypy1/repro.py`: header/separator/refused rows **11/11/11** with PyPy and
+**10/10/10** without; `layer_base` with PyPy missing keeps `wall_ms=2000.0`, `source='base'`;
+`_first_diff(b'ok\n', b'ok')` returns `"stdout line 1: CPython ends 'ok\\n' / PyPy ends 'ok'"`.
+Tests on the final tree: `test_ail_pypy_lab` 22, `test_ail_safetynet` 5, `test_ail_files` 18
+(1 skipped), `test_ail_corpus_findings3` 2 -- all OK.
+
 ## 2026-11-08 -- aiknow1: agent-facing AIL material (job-aiknow1-11081958)
 
 Adds `llms.txt` (llmstxt.org shape, under 150 lines), `docs/AGENT_GUIDE.md` (a worked example with a

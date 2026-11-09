@@ -5,74 +5,44 @@
    "count_ints": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: node",
-    "annotations": {
-     "node": "tuple"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: node stays in CPython"
    },
    "count_tag": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "to_c-refused: 'node' is annotated tuple in the source, but the caller also supplies str; refusing rather than silently choosing one.\n  write instead: make the annotation matc",
-    "annotations": {
-     "node": "tuple",
-     "tag": "str"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "to_c-refused: 'node' is annotated tuple in the source, but the caller also supplies str; refusing rather than silently choosing one.\n  write instead: make the annotation matc stays in CPython"
    },
    "has_tag": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "to_c-refused: 'node' is annotated tuple in the source, but the caller also supplies str; refusing rather than silently choosing one.\n  write instead: make the annotation matc",
-    "annotations": {
-     "node": "tuple",
-     "tag": "str"
-    },
-    "returns": "bool"
+    "gate": "select",
+    "reason": "to_c-refused: 'node' is annotated tuple in the source, but the caller also supplies str; refusing rather than silently choosing one.\n  write instead: make the annotation matc stays in CPython"
    },
    "leaves": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: node",
-    "annotations": {
-     "node": "tuple"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: node stays in CPython"
    },
    "max_depth": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: node",
-    "annotations": {
-     "node": "tuple"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: node stays in CPython"
    },
    "node_count": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: node",
-    "annotations": {
-     "node": "tuple"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: node stays in CPython"
    },
    "sum_ints": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: node",
-    "annotations": {
-     "node": "tuple"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: node stays in CPython"
    }
   },
   "native": [],
@@ -85,30 +55,19 @@
     "unit": true,
     "native": false,
     "gate": "select",
-    "reason": "indexing can raise"
+    "reason": "division or power can raise"
    },
    "bloom_set": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "keys": "list[int]",
-     "bits": "int"
-    },
-    "returns": "list[int]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "make_hashes": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "n": "int",
-     "seed": "int",
-     "mod": "int"
-    },
-    "returns": "list[int]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "multiples": {
     "unit": true,
@@ -130,7 +89,7 @@
     "unit": true,
     "native": false,
     "gate": "select",
-    "reason": "indexing can raise"
+    "reason": "the list parameter is mutated"
    }
   },
   "native": [
@@ -145,32 +104,20 @@
    "count_fields": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "to_c-refused: 'COMMA' is read before it is assigned",
-    "annotations": {
-     "line": "str"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython"
    },
    "field_chars": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "to_c-refused: 'COMMA' is read before it is assigned",
-    "annotations": {
-     "line": "str"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython"
    },
    "max_field_len": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "to_c-refused: 'COMMA' is read before it is assigned",
-    "annotations": {
-     "text": "str"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython"
    },
    "quote_count": {
     "unit": true,
@@ -180,23 +127,14 @@
    "split_lines": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "text": "str"
-    },
-    "returns": "list[str]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "sum_column": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "to_c-refused: 'COMMA' is read before it is assigned",
-    "annotations": {
-     "text": "str",
-     "col": "int"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython"
    }
   },
   "native": [
@@ -215,25 +153,14 @@
    "group_count": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "key": "list[int]",
-     "ngroups": "int"
-    },
-    "returns": "list[int]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "group_sum": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "key": "list[int]",
-     "vals": "list[int]",
-     "ngroups": "int"
-    },
-    "returns": "list[int]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "max_group_count": {
     "unit": true,
@@ -255,7 +182,7 @@
     "unit": true,
     "native": false,
     "gate": "select",
-    "reason": "indexing can raise"
+    "reason": "the list parameter is mutated"
    }
   },
   "native": [
@@ -271,50 +198,42 @@
    "best_match": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: cands",
-    "annotations": {
-     "word": "str",
-     "cands": "list"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: cands stays in CPython"
    },
    "bigram_overlap": {
     "unit": true,
-    "native": false,
-    "gate": "select",
-    "reason": "indexing can raise"
+    "native": true,
+    "reason": null
    },
    "common_prefix": {
     "unit": true,
-    "native": false,
-    "gate": "select",
-    "reason": "indexing can raise"
+    "native": true,
+    "reason": null
    },
    "hamming": {
     "unit": true,
-    "native": false,
-    "gate": "select",
-    "reason": "indexing can raise"
+    "native": true,
+    "reason": null
    },
    "levenshtein": {
     "unit": true,
     "native": false,
     "gate": "select",
-    "reason": "indexing can raise"
+    "reason": "a call can raise or have side effects"
    },
    "total_length": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: words",
-    "annotations": {
-     "words": "list"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: words stays in CPython"
    }
   },
-  "native": [],
+  "native": [
+   "bigram_overlap",
+   "common_prefix",
+   "hamming"
+  ],
   "no_unit": []
  },
  {
@@ -328,12 +247,8 @@
    "is_simple_email": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "addr": "str"
-    },
-    "returns": "bool"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "is_upper_name": {
     "unit": true,
@@ -353,22 +268,14 @@
    "score_ok": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "score": "int"
-    },
-    "returns": "bool"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "valid_len": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "name": "str"
-    },
-    "returns": "bool"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    }
   },
   "native": [
@@ -385,98 +292,54 @@
    "blend": {
     "unit": false,
     "native": false,
-    "gate": "abi-mismatch",
-    "emitted": "double blend(ail_flist v_a, ail_flist v_b, double v_w)",
-    "reason": "the emitted prototype is 'ail_flist v_a, ail_flist v_b, double v_w'",
-    "annotations": {
-     "a": "list[float]",
-     "b": "list[float]",
-     "w": "float"
-    }
+    "gate": "select",
+    "reason": "the typed clone is not wired to the hybrid ABI, stays in CPython"
    },
    "dot": {
     "unit": false,
     "native": false,
-    "gate": "abi-mismatch",
-    "emitted": "double dot(ail_flist v_a, ail_flist v_b)",
-    "reason": "the emitted prototype is 'ail_flist v_a, ail_flist v_b'",
-    "annotations": {
-     "a": "list[float]",
-     "b": "list[float]"
-    }
+    "gate": "select",
+    "reason": "the typed clone is not wired to the hybrid ABI, stays in CPython"
    },
    "max_abs": {
     "unit": false,
     "native": false,
-    "gate": "abi-mismatch",
-    "emitted": "double max_abs(ail_flist v_xs)",
-    "reason": "the emitted prototype is 'ail_flist v_xs'",
-    "annotations": {
-     "xs": "list[float]"
-    }
+    "gate": "select",
+    "reason": "the typed clone is not wired to the hybrid ABI, stays in CPython"
    },
    "mean": {
     "unit": false,
     "native": false,
-    "gate": "abi-mismatch",
-    "emitted": "double mean(ail_flist v_xs)",
-    "reason": "the emitted prototype is 'ail_flist v_xs'",
-    "annotations": {
-     "xs": "list[float]"
-    }
+    "gate": "select",
+    "reason": "the typed clone is not wired to the hybrid ABI, stays in CPython"
    },
    "norm": {
     "unit": false,
     "native": false,
-    "gate": "abi-mismatch",
-    "emitted": "double norm(ail_flist v_xs)",
-    "reason": "the emitted prototype is 'ail_flist v_xs'",
-    "annotations": {
-     "xs": "list[float]"
-    }
+    "gate": "select",
+    "reason": "the typed clone is not wired to the hybrid ABI, stays in CPython"
    },
    "scale_into": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "xs": "list[float]",
-     "k": "float"
-    },
-    "returns": "list[float]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "sq_sum": {
     "unit": false,
     "native": false,
-    "gate": "abi-mismatch",
-    "emitted": "double sq_sum(ail_flist v_xs)",
-    "reason": "the emitted prototype is 'ail_flist v_xs'",
-    "annotations": {
-     "xs": "list[float]"
-    }
+    "gate": "select",
+    "reason": "the typed clone is not wired to the hybrid ABI, stays in CPython"
    },
    "variance": {
     "unit": false,
     "native": false,
-    "gate": "abi-mismatch",
-    "emitted": "double variance(ail_flist v_xs)",
-    "reason": "the emitted prototype is 'ail_flist v_xs'",
-    "annotations": {
-     "xs": "list[float]"
-    }
+    "gate": "select",
+    "reason": "the typed clone is not wired to the hybrid ABI, stays in CPython"
    }
   },
   "native": [],
-  "no_unit": [
-   "blend",
-   "dot",
-   "max_abs",
-   "mean",
-   "norm",
-   "sq_sum",
-   "variance"
-  ]
+  "no_unit": []
  },
  {
   "module": "graph_search",
@@ -484,66 +347,38 @@
    "bfs_reach": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: adj",
-    "annotations": {
-     "adj": "list[list[int]]",
-     "start": "int"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: adj stays in CPython"
    },
    "build_graph": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "n": "int",
-     "fanout": "int"
-    },
-    "returns": "list[list[int]]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "degree_sum": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: adj",
-    "annotations": {
-     "adj": "list[list[int]]"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: adj stays in CPython"
    },
    "dfs_count": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: adj",
-    "annotations": {
-     "adj": "list[list[int]]",
-     "start": "int"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: adj stays in CPython"
    },
    "edges_above": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: adj",
-    "annotations": {
-     "adj": "list[list[int]]",
-     "lo": "int"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: adj stays in CPython"
    },
    "max_degree": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: adj",
-    "annotations": {
-     "adj": "list[list[int]]"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: adj stays in CPython"
    }
   },
   "native": [],
@@ -555,22 +390,14 @@
    "adler32_simple": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: data",
-    "annotations": {
-     "data": "bytes"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: data stays in CPython"
    },
    "crc32_table_free": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: data",
-    "annotations": {
-     "data": "bytes"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: data stays in CPython"
    },
    "djb2": {
     "unit": true,
@@ -581,42 +408,26 @@
    "fnv1a": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: data",
-    "annotations": {
-     "data": "bytes"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: data stays in CPython"
    },
    "fnv1a_64": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: data",
-    "annotations": {
-     "data": "bytes"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: data stays in CPython"
    },
    "sum_bytes": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: data",
-    "annotations": {
-     "data": "bytes"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: data stays in CPython"
    },
    "xor_fold": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: data",
-    "annotations": {
-     "data": "bytes"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: data stays in CPython"
    }
   },
   "native": [],
@@ -670,24 +481,14 @@
    "identity": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "n": "int"
-    },
-    "returns": "list[int]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "mat_mul": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "a": "list[int]",
-     "b": "list[int]",
-     "n": "int"
-    },
-    "returns": "list[int]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "max_element": {
     "unit": true,
@@ -697,13 +498,8 @@
    "row_sums": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "m": "list[int]",
-     "n": "int"
-    },
-    "returns": "list[int]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "scale_vec": {
     "unit": true,
@@ -712,16 +508,16 @@
    },
    "trace": {
     "unit": true,
-    "native": false,
-    "gate": "select",
-    "reason": "indexing can raise"
+    "native": true,
+    "reason": null
    }
   },
   "native": [
    "apply_threshold",
    "count_negative",
    "max_element",
-   "scale_vec"
+   "scale_vec",
+   "trace"
   ],
   "no_unit": []
  },
@@ -741,13 +537,8 @@
    "make_samples": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "n": "int",
-     "seed": "int"
-    },
-    "returns": "list[int]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "mean_scaled": {
     "unit": true,
@@ -759,7 +550,7 @@
     "unit": true,
     "native": false,
     "gate": "select",
-    "reason": "indexing can raise"
+    "reason": "the list parameter is mutated"
    },
    "second_moment": {
     "unit": true,
@@ -774,13 +565,8 @@
    "window_sums": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "xs": "list[int]",
-     "w": "int"
-    },
-    "returns": "list[int]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    }
   },
   "native": [
@@ -802,25 +588,14 @@
    "count_terms": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: words",
-    "annotations": {
-     "words": "list[str]",
-     "vocab_size": "int"
-    },
-    "returns": "list[int]"
+    "gate": "select",
+    "reason": "unresolved-param: words stays in CPython"
    },
    "hash_spread": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: words",
-    "annotations": {
-     "words": "list[str]",
-     "vocab_size": "int",
-     "buckets": "int"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: words stays in CPython"
    },
    "max_count": {
     "unit": true,
@@ -830,24 +605,14 @@
    "top_indices": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "counts": "list[int]",
-     "k": "int"
-    },
-    "returns": "list[int]"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "top_score": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "to_c-refused: returning Subscript as a list",
-    "annotations": {
-     "counts": "list[int]",
-     "k": "int"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "to_c-refused: returning Subscript as a list stays in CPython"
    },
    "total_count": {
     "unit": true,
@@ -873,9 +638,8 @@
    },
    "count_keywords": {
     "unit": true,
-    "native": false,
-    "gate": "select",
-    "reason": "indexing can raise"
+    "native": true,
+    "reason": null
    },
    "digit_count": {
     "unit": true,
@@ -886,22 +650,14 @@
    "is_ident_char": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "ch": "str"
-    },
-    "returns": "bool"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "is_ident_start": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "ch": "str"
-    },
-    "returns": "bool"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "longest_ident": {
     "unit": true,
@@ -916,7 +672,9 @@
     "reason": "a call can raise or have side effects"
    }
   },
-  "native": [],
+  "native": [
+   "count_keywords"
+  ],
   "no_unit": []
  },
  {
@@ -925,22 +683,14 @@
    "build_tree": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-return: no return, or contradictory returns",
-    "annotations": {
-     "keys": "list[int]"
-    },
-    "returns": "Tree"
+    "gate": "select",
+    "reason": "unresolved-return: no return, or contradictory returns stays in CPython"
    },
    "count_nodes": {
     "unit": false,
     "native": false,
-    "gate": "pymix",
-    "reason": "unresolved-param: t",
-    "annotations": {
-     "t": "Tree"
-    },
-    "returns": "int"
+    "gate": "select",
+    "reason": "unresolved-param: t stays in CPython"
    }
   },
   "native": [],
