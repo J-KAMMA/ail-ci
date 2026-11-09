@@ -83,5 +83,5 @@ re-run on both builds after the change.
 ## Required AIL tests
 
 `python3 tools/par_check.py -j 2 test_ail_safetynet test_ail_files test_ail_corpus_findings3`:
-3 modules, 0 failed (150 s, final commit). No compiler, runtime, test, or manifest file was changed;
-the only changes are under `lab/dogfood/` plus the DEVLOG record.
+3 modules, 0 failed (wall 150-187 s across runs, all on the final tree). No compiler, runtime,
+test, or manifest file was changed; the only changes are under `lab/dogfood/` plus the DEVLOG record.
