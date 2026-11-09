@@ -29,7 +29,7 @@ never replaces an existing annotation.
 26.33.0 is pinned because its `[rs]` extra ships
 `sqlglotrs.cpython-312-x86_64-linux-gnu.so`, and `SQLGLOTRS_TOKENIZER` defaults to `1`.
 Every variant's stdout is byte-identical to CPython (SHA-256 checked in `times.json`), including the
-250 s/2 s PyPy and native runs below.
+PyPy and native runs below.
 
 All runs: one workload at a time, `RLIMIT_AS = 2.5 GB`, median of 5 processes, `AIL_NO_CACHE=1` for
 builds. `tools/icount.c` builds but `perf_event_open` is denied on this runner (`Permission denied`),
