@@ -31941,7 +31941,22 @@ REQUIRES['PARN'] = ['PAR']
 PARRED = r"""
 typedef struct { __int128 s, mx, mn; } ail_red_part;
 typedef void (*ail_red_fn)(void **, int64_t, int64_t, ail_red_part *);
-typedef void (*ail_red_rerun)(void **, int64_t, int64_t, int64_t *);
+typedef void (*ail_red_rerun)(void **, int64_t, int64_t, volatile int64_t **);
+/* A re-run's checked add: the same loud stop the sequential loop produces. The Python surface keeps
+   an int64 overflow uncatchable (see _OVERFLOW_EXCEPTION_PYTHON_EDIT), so the re-run never turns it
+   into an OverflowError the sequential loop would not raise. */
+static int64_t ail_red_add(int64_t a, int64_t b) {
+    int64_t r;
+    if (__builtin_add_overflow(a, b, &r))
+        ail_die("OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)");
+    return r;
+}
+static int64_t ail_red_sub(int64_t a, int64_t b) {
+    int64_t r;
+    if (__builtin_sub_overflow(a, b, &r))
+        ail_die("OverflowError: integer overflow in - (ints are 64-bit; --exact-int gives exact ints)");
+    return r;
+}
 typedef struct { int64_t lo, hi; int failed, code; char msg[192]; } ail_red_chunk;
 typedef struct {
     ail_red_fn fn; void **args; ail_red_chunk *ch; ail_red_part *parts; int64_t nacc, fail;
@@ -31974,28 +31989,28 @@ static int ail_red_threads(int64_t cap) {
 }
 /* The combine in chunk order from B = acc[]: the number of the chunk where the sequential loop stops
    (it failed, or a prefix of it leaves int64 from B), or nchunks with acc[] the final sums. */
-static int64_t ail_red_combine(const ail_red_job *R, int64_t nchunks, int64_t *acc) {
+static int64_t ail_red_combine(const ail_red_job *R, int64_t nchunks, volatile int64_t **accp) {
     for (int64_t k = 0; k < nchunks; k++) {
         if (R->ch[k].failed) return k;
         const ail_red_part *P = R->parts + k * R->nacc;
         for (int64_t j = 0; j < R->nacc; j++)
-            if ((__int128)acc[j] + P[j].mx > (__int128)INT64_MAX || (__int128)acc[j] + P[j].mn < (__int128)INT64_MIN) return k;
-        for (int64_t j = 0; j < R->nacc; j++) acc[j] = (int64_t)((__int128)acc[j] + P[j].s);
+            if ((__int128)*accp[j] + P[j].mx > (__int128)INT64_MAX || (__int128)*accp[j] + P[j].mn < (__int128)INT64_MIN) return k;
+        for (int64_t j = 0; j < R->nacc; j++) *accp[j] = (int64_t)((__int128)*accp[j] + P[j].s);
     }
     return nchunks;
 }
-/* acc[0..nacc) holds the accumulators before the loop and after it. site and cap as for ail_par_run_n. */
+/* accp[0..nacc) point at the accumulators before the loop and after it. site and cap as for ail_par_run_n. */
 static void ail_par_reduce_run(ail_red_fn fn, void **args, int64_t lo, int64_t hi, ail_par_site *S, int64_t cap,
-                               int64_t nacc, int64_t *acc, ail_red_rerun rerun) {
+                               int64_t nacc, volatile int64_t **accp, ail_red_rerun rerun) {
     if (hi <= lo) return;
     int64_t n = hi - lo;
     int nt = ail_red_threads(cap);
-    if (lo < 0 || n < 2 || nt <= 1 || ail_par_cur || nacc < 1) { rerun(args, lo, hi, acc); return; }
+    if (lo < 0 || n < 2 || nt <= 1 || ail_par_cur || nacc < 1) { rerun(args, lo, hi, accp); return; }
     int64_t i = lo;
     if (n > 64) {
         if (n <= S->light_n) {
             int64_t t0 = ail_par_now();
-            rerun(args, lo, hi, acc);
+            rerun(args, lo, hi, accp);
             if (ail_par_now() - t0 > 2 * AIL_PAR_MIN_NS) S->light_n = n - 1;
             return;
         }
@@ -32004,7 +32019,7 @@ static void ail_par_reduce_run(ail_red_fn fn, void **args, int64_t lo, int64_t h
             for (;;) {
                 int64_t e = i + step;
                 if (e > hi || e < i) e = hi;
-                rerun(args, i, e, acc);
+                rerun(args, i, e, accp);
                 i = e;
                 if (i >= hi) { S->light_n = n; return; }
                 int64_t spent = ail_par_now() - t0;
@@ -32015,7 +32030,7 @@ static void ail_par_reduce_run(ail_red_fn fn, void **args, int64_t lo, int64_t h
         }
     }
     n = hi - i;
-    if (n < 2) { rerun(args, i, hi, acc); return; }
+    if (n < 2) { rerun(args, i, hi, accp); return; }
     int64_t nchunks = (int64_t)nt * 8;
     if (nchunks > n) nchunks = n;
     ail_red_job R;
@@ -32036,20 +32051,20 @@ static void ail_par_reduce_run(ail_red_fn fn, void **args, int64_t lo, int64_t h
     ail_par_go_wide(ail_red_chunks, (void **)(void *)&R, 0, nchunks);
     ail_par_cap = keep;
     __atomic_store_n(&ail_par_cap_inside, 255, __ATOMIC_RELAXED);
-    int64_t k = ail_red_combine(&R, nchunks, acc);
+    int64_t k = ail_red_combine(&R, nchunks, accp);
     if (k == nchunks) { free(R.ch); free(R.parts); return; }
     ail_red_chunk C = R.ch[k];
     free(R.ch); free(R.parts);
     /* the sequential loop stops inside chunk k: run it alone from B; it raises what the sequential loop
        raises there, with acc[] at the last prefix that fitted */
-    rerun(args, C.lo, C.hi, acc);
+    rerun(args, C.lo, C.hi, accp);
     if (C.failed) {   /* the body did not repeat its trap: raise the recorded one */
         if (C.msg[0] && C.code)
             ail_raise_value_adopt(ail_exception_new(C.code, (const uint8_t *)C.msg, (int64_t)strlen(C.msg), 1));
         if (C.msg[0]) ail_die(C.msg);
         ail_raise_named(C.code ? C.code : AIL_EXC_RUNTIME);
     }
-    rerun(args, C.hi, hi, acc);   /* not reached for a pure body: the test is exact */
+    rerun(args, C.hi, hi, accp);   /* not reached for a pure body: the test is exact */
 }
 """
 ORDER.insert(ORDER.index('PARN') + 1, 'PARRED')

@@ -14,6 +14,50 @@ of 3 of 519 defs (all sqlparse; 2 distinct grouped reasons) and added no native 
 per-library split and the cost estimate for each of the top three; `results.json` has every
 definition's raw reason and self time. No new test module. Tests: `test_ail_safetynet`,
 `test_ail_files`, `test_ail_corpus_findings3` on the final commit.
+## 2026-11-09 -- wedge3c: jellyfish 0.8.9 and msgpack 1.0.7 against the guarded hybrid (job-wedge3c-11091226)
+
+Measurement only; no compiler, runtime or test change.  `lab/wedge3/wedge3c/` adds `bench.py` (the
+single harness), two workloads, two probe programs, `results.json`, `RESULTS.md`, and pinned
+`requirements.txt` / `requirements-native.txt`.  Both pure libraries are pip-installed into venvs and
+copied to a temp dir at run time (never vendored); the hot module is made a valid AIL entry file and
+built with `ail_chatgpt.py build --cpython` from the observed-types branch `job-obs5-op1109`
+(`69e2dcd0a82580fa06e26b275352fbedfb7d31e1`, not yet integrated).
+
+The headline: **the hybrid selected 0 of the 6 jellyfish functions submitted to the build (0 of the
+module's 14) and 0 of 35 msgpack units**, so it ran at CPython parity while PyPy was 3.3-5.4x and the
+native rewrite 10.5-14.1x faster.  Times are the median of 5 under `ulimit -v 2500000`, one workload
+at a time; every column's stdout and exit status matched CPython byte for byte.
+
+| library | units | native | CPython s | PyPy s | hybrid s | hybrid+obs s | native s | hybrid/CPython | hybrid/PyPy | hybrid/native |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| jellyfish 0.8.9 / 1.1.0 (Rust) | 14 | 0 | 2.893 | 0.529 | 2.839 | 2.840 | 0.270 | 0.981 | 5.368 | 10.523 |
+| msgpack 1.0.7 pure / C ext | 35 | 0 | 2.223 | 0.673 | 2.209 | 2.211 | 0.157 | 0.994 | 3.282 | 14.056 |
+
+The sub-1.0 `hybrid/CPython` ratios are noise: no real function was selected, so the hybrid column is
+the unmodified pure library.  The msgpack native column is the C extension, not Rust -- no Rust rewrite
+exists; it is reported as the native baseline.  Observed kinds (`ail_observe annotate`) selected only
+`_normalize` (the sanitised helper the harness had to neutralise, never deployed), and split jellyfish's
+remaining gate from `unresolved-param` (all six) into four units refused as `unresolved-return: return
+branches require distinct tags` (`_jaro_winkler`, `jaro_winkler_similarity`, `levenshtein_distance`,
+`soundex`) plus `_check_type` refused as `unresolved-return: no return, or contradictory returns`; for
+msgpack they only regrouped the `_buffer` blame.  Ranked by
+CPython self time kept interpreted: jellyfish `unresolved-param: s1, s2` 1.793 s (`levenshtein_distance`),
+`s1, s2, long_tolerance` 1.022 s (`_jaro_winkler`, `jaro_winkler_similarity`), `s` 0.595 s (`_check_type`,
+`_normalize`, `soundex`); msgpack class-with-decorators/bases/metaclass 3.477 s, decorated or
+non-plain-signature method 2.348 s, `self._use_bin_type` 0.294 s, `self._buffer` 0.101 s.
+
+`tools/icount.c` builds but `perf_event_open` is denied on this runner (`perf_event_paranoid = 4`) and
+`valgrind` is absent, so no instruction counts; wall times are the only measurement.
+
+Probes in `lab/wedge3/wedge3c/probes/`, run with `bash ~/tools/cmp.sh <probe> $PWD`: `jellyfish_edges.py`
+and `msgpack_edges.py` cover empty, equal, long, numeric, negative, punctuation, argument, list-item,
+dict-value and attribute channels.  Both builds refuse each third-party import by name ("import of
+'jellyfish'/'msgpack' is not available"), which is the expected result, not a behaviour change.  The
+four installed columns (pure CPython, PyPy, hybrid, native) were byte-identical on the same probes and
+on the full workloads (`output_sha` in `results.json`).
+
+Tests on the final tree, `-j 2`: `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+-- 3 modules, 0 failed, 770 s.  `python3 tools/update_manifest.py --check` passes.
 
 ## 2026-11-08 -- fz243: the reported seed does not reproduce on this tree; no code changed (job-fz243-11090607)
 
@@ -116,6 +160,46 @@ from a one-file staging directory. Probes: `lab/wedge3/wedge3b/probes/` (four fi
 build refuses two by name at the int64 constant boundary, the hybrid matches all four). See
 `lab/wedge3/wedge3b/RESULTS.md`.
 
+## 2026-11-09 -- wedge3 suite fix: allow the SQL workload data file (job-wedge3-11091646)
+
+`test_ail_wedge3` failed on the current integration candidate (`1fe0b64`): the
+wedge3b job adds `lab/wedge3/wedge3b/workloads/queries.sql`, and the test's
+no-vendored-source check allowed only `.py`, `.txt`, `.json`, `.md` and `.sh`.
+That check exists to catch vendored library source, so SQL workload data is
+legitimate; the suffix allowlist now includes `.sql`. No compiler or runtime
+behaviour changed. Reproduced the failure on `origin/cand-1109154137` and the
+fix passes there and on `origin/cand-1109165043` with the wedge3 artefact
+overlaid; `test_ail_wedge3` also still passes on this tree.
+
+## 2026-11-09 -- wedge3: the CPython hybrid on real libraries with Rust rewrites (job-wedge3-11091201)
+
+Measurement only; no compiler or runtime file changed. Built the hybrid from the `job-obs5-op1109`
+worktree (commit `69e2dcd0a82580fa06e26b275352fbedfb7d31e1`), not from this branch, because the
+observed-type work obs1-obs5 is not integrated here. `lab/wedge3/` holds the scripts, pinned
+`requirements.txt`, raw `results.json` and `RESULTS.md`; the five libraries are pip-installed into
+throw-away venvs and never vendored.
+
+Five pairs (networkx/rustworkx, jsonschema/jsonschema-rs, chardet/charset-normalizer, tomli/rtoml,
+difflib/rapidfuzz) were measured on deterministic 1.5-4.4 s workloads, medians of 5. The hybrid
+made **0 of 191** hot-module functions native and ran at a geometric-mean **1.045x CPython**
+(0.967-1.075x). PyPy ran the pure libraries at 0.39-1.0x the hybrid's time (the hybrid took
+1.0-2.6x PyPy's time), and the rewrites were a geometric-mean **2.31x faster than CPython**
+(rewrite/CPython: jsonschema-rs 7.58x faster, rtoml 3.26x faster, rapidfuzz 3.15x faster,
+rustworkx 2.78x faster; charset-normalizer was 3.28x *slower* on these payloads and is reported as
+measured). Every hybrid
+output matched CPython byte for byte, plain and observed, on all five workloads.
+
+The observed-type recorder (`--all --fast`) plus `ail_observe annotate` changed the source of
+networkx, jsonschema and difflib, but the native count stayed 0; the blockers are structural.
+Refusals ranked by recorder self time: `pymix` not-a-typed-candidate 42.6%, nested
+function/lambda/comprehension 36.7% (networkx's weight lambda alone 2.6 s, jsonschema's
+attrs-generated `Validator` methods 0.80 s), method class shape 19.7%, dunder/decorated 0.9%,
+calls-a-refused-method 0.1%; 2.14 s more is in library modules outside the built hot set (chardet
+probers 1.54 s). `RESULTS.md` carries the five 2-hour tasks. Probes `/tmp/probes/wedge3_{int,list,str}.py`
+match CPython on both builds with `bash ~/tools/cmp.sh`; hybrid builds of them accelerate 2 functions
+each and match byte for byte. Added `test_ail_wedge3.py` (registered in `tests.d/`), which pins the
+artefact shape, the zero-native result, the compiler commit and the no-vendoring rule. Tests on the
+final commit: `test_ail_wedge3`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
 
 ## 2026-11-08 -- aiknow1: agent-facing AIL material (job-aiknow1-11081958)
 

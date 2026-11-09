@@ -28691,6 +28691,7 @@ def _while(node, ctx, ind):
 
 _PAR_REGION = re.compile(r'^[ ]*/\*@par:begin:(\d+)\*/\n(.*?)^[ ]*/\*@par:end:\1\*/\n', re.S | re.M)
 _PAR_CAPTURE_TYPES = ('int64_t', 'double', 'ail_flist', 'ail_list', 'ail_bytes', 'ail_bytearray *',
+                      'ail_list *', 'ail_flist *', 'ail_bytes *',
                       'const int64_t *', 'const double *')
 # Runtime helpers a parallel body may reach: pure arithmetic, bounds-checked element access (their
 # traps are intercepted, see cruntime._PARALLEL_DIE_EDITS), and the tagged-int (tint_typed.py)
@@ -28716,13 +28717,12 @@ _PAR_HELPERS = frozenset((
 
 
 def _par_for(node, ctx, ind):
-    if ctx.exc_frame:
-        raise Unsupported('parallel for cannot be used in a function that has try/except; '
-                          'write instead: move the loop into its own fn')
     if ctx.par_depth:
         raise Unsupported('parallel for cannot be nested')
-    ctx.parts.add('PAR')
     info = node.par
+    if ctx.exc_frame and not info.get('reductions'):
+        raise Unsupported('parallel for cannot be inside try; write instead: put the loop in its own fn')
+    ctx.parts.add('PAR')
     if info.get('reductions'):
         ctx.parts.add('PARRED')                 # cruntime.py: the exact shared-int reduction
     if info.get('cap'):
@@ -28763,24 +28763,31 @@ def _red_stmt(text, acc, j, op, chunk):
                     'if (_t < _mn%d) _mn%d = _t; %s = (int64_t)_t; }\n'
                     % (i, j, '-' if op == '-' else '+', p, j, j, j, j, j, acc))
         t2 = p.strip().lstrip('(').split(' = ')[0]
-        return ('%s%s = (%s, ck_%s(%s, %s));\n%s_acc[%d] = %s;\n'
+        return ('%s%s = (%s, ail_red_%s(%s, %s));\n%s*_acc[%d] = %s;\n'
                 % (i, acc, p, 'sub' if op == '-' else 'add', acc, t2, i, j, acc))
     return re.sub(r'(?m)^([ \t]*)' + re.escape(acc) + r' = \((.*)\);\s*$', one, text)
 
 
 def _par_decls(decls, sig):
     """C name -> (type, declaration line) for the function's locals, and C name -> type for its parameters."""
+    def _type(text):
+        text = re.sub(r'\s+', ' ', text).strip().replace(' *', ' *')
+        text = re.sub(r'\*\s+const\b', '*', text)
+        text = re.sub(r'^(?:volatile|_Atomic)\s+', '', text)
+        if '*' not in text:
+            text = re.sub(r'^const\s+', '', text)
+        return text
     local = {}
     for line in decls.splitlines():
-        m = re.match(r'\s+((?:const\s+)?[A-Za-z_]\w*(?:\s*\*+\s*|\s+))(v_\w+)(\s*=[^;]*)?;\s*$', line)
+        m = re.match(r'\s+((?:volatile\s+|_Atomic\s+)?(?:const\s+)?[A-Za-z_]\w*(?:\s*\*+\s*(?:const\s+)?|\s+))(v_\w+)(\s*=[^;]*)?;\s*$', line)
         if m:
-            local[m[2]] = (re.sub(r'\s+', ' ', m[1]).strip().replace(' *', ' *'), line.strip())
+            local[m[2]] = (_type(m[1]), line.strip())
     params = {}
     head = sig.split('\n')[-1]
     for part in head[head.index('(') + 1:head.rindex(')')].split(','):
-        m = re.match(r'\s*((?:const\s+)?[A-Za-z_]\w*(?:\s*\*+\s*|\s+))(v_\w+)\s*$', part)
+        m = re.match(r'\s*((?:volatile\s+|_Atomic\s+)?(?:const\s+)?[A-Za-z_]\w*(?:\s*\*+\s*|\s+))(v_\w+)\s*$', part)
         if m:
-            params[m[2]] = re.sub(r'\s+', ' ', m[1]).strip()
+            params[m[2]] = _type(m[1])
     return local, params
 
 
@@ -28882,18 +28889,17 @@ def _par_outline(generated, sig, decls, ctx, cname):
             lines += priv + [body]
             lines += ['    _p[%d] = (ail_red_part){_s%d, _mx%d, _mn%d};\n' % (j, j, j, j)
                       for j in range(len(reds))]
-            lines += ['}\n', 'static void %s_rerun(void **_a, int64_t _lo, int64_t _hi, int64_t *_acc) {\n' % worker]
-            lines += head + ['    int64_t v_%s = _acc[%d];\n' % (n, j) for j, (n, _) in enumerate(reds)]
+            lines += ['}\n', 'static void %s_rerun(void **_a, int64_t _lo, int64_t _hi, volatile int64_t **_acc) {\n' % worker]
+            lines += head + ['    int64_t v_%s = *_acc[%d];\n' % (n, j) for j, (n, _) in enumerate(reds)]
             lines += priv + [rerun, '}\n']
             workers.append(''.join(lines))
-            accs = ', '.join('v_' + n for n, _ in reds)
-            back = ' '.join('v_%s = _ar%d[%d];' % (n, k, j) for j, (n, _) in enumerate(reds))
+            accs = ', '.join('&v_' + n for n, _ in reds)
             return ('    {\n        static ail_par_site _ps%d;\n        void *_pa%d[] = {%s};\n'
-                    '        int64_t _ar%d[] = {%s};\n%s'
+                    '        volatile int64_t *_ar%d[] = {%s};\n%s'
                     '        ail_par_reduce_run(%s, _pa%d, %s, %s, &_ps%d, %s, %d, _ar%d, %s_rerun);\n'
-                    '        %s\n    }\n'
+                    '    }\n'
                     % (k, k, array, k, accs, guards, worker, k, facts['lo'], facts['hi'], k,
-                       facts['cap'] if facts.get('cap') else '0', len(reds), k, worker, back))
+                       facts['cap'] if facts.get('cap') else '0', len(reds), k, worker))
         lines = ['static void %s(void **_a, int64_t _lo, int64_t _hi) {\n' % worker] + head + priv + [text, '}\n']
         workers.append(''.join(lines))
         if pb is not None:
