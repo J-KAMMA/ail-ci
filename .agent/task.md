@@ -1,3 +1,6 @@
+**Continue this job: its last run ended FINAL VERDICT: ERROR, most likely the runner time limit.** You work on the job's branch, so earlier commits are here. Read git log and the DEVLOG first, do not redo finished sub-steps, finish the rest, commit after each. Keep the run under 4 hours; cut sizes or seeds if needed and say so.
+
+--- ORIGINAL TASK ---
 Lane: fb-reduce
 Needs: fbred4
 
