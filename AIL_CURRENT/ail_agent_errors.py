@@ -664,14 +664,37 @@ def _loc_bytes_return(text, lines, tree, item):
     return None
 
 
+def _has_own_break(node):
+    """True when `node` (a loop) can be left by a `break` belonging to it.
+
+    A `break` inside a nested loop or a nested function leaves that construct, not this loop, so
+    the search stops at those.  The `else` suite cannot hold a `break` (Python rejects it)."""
+    stack = list(ast.iter_child_nodes(node))
+    while stack:
+        current = stack.pop()
+        if isinstance(current, ast.Break):
+            return True
+        if isinstance(current, (ast.While, ast.For, ast.AsyncFor, ast.FunctionDef,
+                                ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        stack.extend(ast.iter_child_nodes(current))
+    return False
+
+
 def _loc_while_else(text, lines, tree, item):
     if tree is None:
         return None
     for node in ast.walk(tree):
         if not isinstance(node, ast.While) or not node.orelse:
             continue
-        if any(isinstance(inner, ast.Break) for inner in ast.walk(node)):
-            continue
+        if _has_own_break(node):
+            # The table's cause ("the loop has no `break`, so the `else` body always runs") is
+            # false here, and moving the `else` body after the loop would change what prints.
+            cause = ('`while ... else:` is not supported; here the loop has a `break`, so the '
+                     '`else` body runs only when the loop ends without one. Set a flag before the '
+                     'loop, clear it before each `break`, and test it after the loop.')
+            return dict(line=node.lineno, col=node.col_offset + 1, fix=None, cause=cause,
+                        force_position=True, no_fallback=True)
         end_body = node.body[-1].end_lineno if node.body else node.lineno
         base = _indent(lines[node.lineno - 1]) if node.lineno <= len(lines) else 0
         block = list(lines[node.lineno - 1:end_body])

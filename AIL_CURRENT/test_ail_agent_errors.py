@@ -480,6 +480,36 @@ class AgentErrors(unittest.TestCase):
         self.assertEqual(found[0]['severity'], 'error')
         self.assertEqual(found[0]['line'], 3)
 
+    def test_while_else_with_break_is_break_aware(self):
+        # The table's cause says "the loop has no `break`, so the `else` body always runs" and
+        # offers to move the `else` after the loop.  Both are false when the loop breaks, and the
+        # move would change the output, so the locator must report the break and publish no edit.
+        text = """i = 0
+while i < 3:
+    if i == 1:
+        break
+    i += 1
+else:
+    print("else")
+print("after", i)
+"""
+        source = self.tmp / 'while_break.py'
+        source.write_text(text, encoding='utf-8')
+        built = self.compile(source, 'while_break')
+        self.assertEqual(built.returncode, 0, built.stderr)
+        found = [item for item in json.loads(built.stdout).get('agent_diagnostics', [])
+                 if item['code'] == 'AIL0109']
+        self.assertEqual(len(found), 1, found)
+        item = found[0]
+        self.assertEqual((item['line'], item['col']), (2, 1), item)
+        self.assertIn('has a `break`', item['cause'], item)
+        self.assertNotIn('no `break`', item['cause'], item)
+        self.assertNotIn('fix', item, item)
+        self.assertNotIn('\nReplace:\n', item['message'])
+        self.assertNotIn('move after the loop', item['message'])
+        native = subprocess.run([sys.executable, str(source)], capture_output=True, timeout=120)
+        self.assertEqual(native.stdout.decode(), 'after 1\n')
+
 
 if __name__ == '__main__':
     unittest.main()
