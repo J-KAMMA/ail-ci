@@ -5,44 +5,44 @@
     {
       "annotated_output_matches": true,
       "cpython": {
-        "median_s": 1.1174130040000136,
+        "median_s": 1.1045559780000076,
         "times_s": [
-          1.136818,
-          1.107391,
-          1.104173,
-          1.117413,
-          1.118465
+          1.101092,
+          1.12169,
+          1.163739,
+          1.104556,
+          1.102123
         ]
       },
       "driver_env": {
         "W3D_N": "50000"
       },
       "functions": {
-        "defs": 61,
+        "defs": 58,
         "methods": 54,
         "native_plain": 0,
-        "top_level": 4
+        "top_level": 2
       },
       "functions_observed": {
-        "defs": 61,
+        "defs": 58,
         "methods": 54,
         "native_observed": 0,
-        "top_level": 4
+        "top_level": 2
       },
       "hot_module": "dateutil/parser/_parser.py",
       "hybrid": {
-        "median_s": 1.129677337999965,
+        "median_s": 1.1061932559998695,
         "times_s": [
-          1.159533,
-          1.097656,
-          1.129677,
-          1.101905,
-          1.12986
+          1.141347,
+          1.154637,
+          1.097127,
+          1.106193,
+          1.10269
         ]
       },
-      "hybrid_ratio_cpython": 1.011,
-      "hybrid_ratio_native": 7.577,
-      "hybrid_ratio_pypy": 1.047,
+      "hybrid_ratio_cpython": 1.001,
+      "hybrid_ratio_native": 7.536,
+      "hybrid_ratio_pypy": 1.028,
       "hybrid_report": {
         "accelerated": [],
         "extension": null,
@@ -113,30 +113,30 @@
       },
       "library": "dateutil",
       "native": {
-        "median_s": 0.14908732599997165,
+        "median_s": 0.1467966009997781,
         "times_s": [
-          0.149087,
-          0.151391,
-          0.149506,
-          0.148254,
-          0.148546
+          0.148669,
+          0.14715,
+          0.146003,
+          0.145949,
+          0.146797
         ]
       },
       "native_ratio_cpython": 0.133,
       "native_rewrite": "ciso8601 (C)",
       "observed": {
-        "median_s": 1.1282049059999508,
+        "median_s": 1.1013116980000177,
         "times_s": [
-          1.143533,
-          1.128205,
-          1.131805,
-          1.103597,
-          1.11693
+          1.109952,
+          1.101312,
+          1.124419,
+          1.094703,
+          1.099801
         ]
       },
-      "observed_ratio_cpython": 1.01,
-      "observed_ratio_native": 7.567,
-      "observed_ratio_pypy": 1.046,
+      "observed_ratio_cpython": 0.997,
+      "observed_ratio_native": 7.502,
+      "observed_ratio_pypy": 1.024,
       "observed_report": {
         "accelerated": [],
         "extension": null,
@@ -208,18 +208,18 @@
       "output": "count=50000 hash=4a1eda6998f62954 first=N1970-01-01T00:00:00 last=A2033-06-16T14:28:43.450009",
       "package": "dateutil",
       "pypy": {
-        "median_s": 1.0784814060000372,
+        "median_s": 1.0756559310000284,
         "times_s": [
-          1.075258,
-          1.078481,
-          1.079923,
-          1.071801,
-          1.081697
+          1.075273,
+          1.083009,
+          1.075656,
+          1.069931,
+          1.076829
         ]
       },
       "pypy_version": "Python 3.10.16 (64367dfeb263, Feb 24 2025, 17:31:14)",
       "refusals": {
-        "hot_self_s": 2.447215,
+        "hot_self_s": 2.473215,
         "native_self_s": 0.0,
         "reasons": [
           {
@@ -260,7 +260,7 @@
               "parserinfo.weekday"
             ],
             "reason": "method of a class with decorators, bases, a metaclass or class attributes",
-            "self_s": 2.281537
+            "self_s": 2.307035
           },
           {
             "functions": [
@@ -268,37 +268,17 @@
               "<module>",
               "ParserError",
               "UnknownTimezoneWarning",
-              "__getitem__",
-              "__init__",
-              "__next",
-              "__setitem__",
               "_attr",
-              "_class_escape",
-              "_escape",
-              "_parse_flags",
-              "_parse_sub",
               "_result",
               "_resultbase",
               "_timelex",
               "_tzparser",
-              "_uniq",
               "_ymd",
-              "checkgroupname",
-              "closegroup",
-              "fix_flags",
-              "get",
-              "getuntil",
-              "getwidth",
-              "groups",
-              "match",
-              "opengroup",
               "parser",
-              "parserinfo",
-              "seek",
-              "tell"
+              "parserinfo"
             ],
             "reason": "no refusal recorded (not selected as a candidate)",
-            "self_s": 0.077356
+            "self_s": 0.077784
           },
           {
             "functions": [
@@ -306,14 +286,14 @@
               "_resultbase.__len__"
             ],
             "reason": "a decorated, dunder or non-plain-signature method",
-            "self_s": 0.064787
+            "self_s": 0.064767
           },
           {
             "functions": [
               "parse"
             ],
             "reason": "not a typed candidate",
-            "self_s": 0.023535
+            "self_s": 0.023628
           }
         ]
       },
@@ -322,44 +302,44 @@
     {
       "annotated_output_matches": true,
       "cpython": {
-        "median_s": 1.236554735000027,
+        "median_s": 1.2084275890001663,
         "times_s": [
-          1.27559,
-          1.236555,
-          1.233434,
-          1.261682,
-          1.210111
+          1.198946,
+          1.256013,
+          1.217568,
+          1.208428,
+          1.206915
         ]
       },
       "driver_env": {
         "W3D_REPEATS": "100000"
       },
       "functions": {
-        "defs": 20,
+        "defs": 17,
         "methods": 17,
         "native_plain": 0,
-        "top_level": 2
+        "top_level": 0
       },
       "functions_observed": {
-        "defs": 20,
+        "defs": 17,
         "methods": 17,
         "native_observed": 0,
-        "top_level": 2
+        "top_level": 0
       },
       "hot_module": "ahocorapy/keywordtree.py",
       "hybrid": {
-        "median_s": 1.2467400140000109,
+        "median_s": 1.2093614230000185,
         "times_s": [
-          1.289596,
-          1.24674,
-          1.338126,
-          1.20542,
-          1.221297
+          1.231184,
+          1.209389,
+          1.202404,
+          1.209361,
+          1.20454
         ]
       },
-      "hybrid_ratio_cpython": 1.008,
-      "hybrid_ratio_native": 8.355,
-      "hybrid_ratio_pypy": 3.394,
+      "hybrid_ratio_cpython": 1.001,
+      "hybrid_ratio_native": 8.103,
+      "hybrid_ratio_pypy": 3.379,
       "hybrid_report": {
         "accelerated": [],
         "extension": null,
@@ -391,30 +371,30 @@
       },
       "library": "ahocorapy",
       "native": {
-        "median_s": 0.14922440299994832,
+        "median_s": 0.14924857999994856,
         "times_s": [
-          0.150045,
-          0.149394,
-          0.148644,
-          0.149224,
-          0.149223
+          0.150378,
+          0.149249,
+          0.149393,
+          0.148819,
+          0.149187
         ]
       },
-      "native_ratio_cpython": 0.121,
+      "native_ratio_cpython": 0.124,
       "native_rewrite": "ahocorasick_rs (Rust)",
       "observed": {
-        "median_s": 1.2233696819999977,
+        "median_s": 1.209332884999867,
         "times_s": [
-          1.207524,
-          1.232282,
-          1.260613,
-          1.213481,
-          1.22337
+          1.211877,
+          1.209333,
+          1.206062,
+          1.212903,
+          1.192182
         ]
       },
-      "observed_ratio_cpython": 0.989,
-      "observed_ratio_native": 8.198,
-      "observed_ratio_pypy": 3.331,
+      "observed_ratio_cpython": 1.001,
+      "observed_ratio_native": 8.103,
+      "observed_ratio_pypy": 3.379,
       "observed_report": {
         "accelerated": [],
         "extension": null,
@@ -447,18 +427,18 @@
       "output": "patterns=500 repeats=100000 textlen=19205994 matches=500 hash=63d4901c7bad2495 first=(19200001, 'p000alwh') last=(19205984, 'p499hsdozk')",
       "package": "ahocorapy",
       "pypy": {
-        "median_s": 0.36728333200005636,
+        "median_s": 0.35794329899999866,
         "times_s": [
-          0.387596,
-          0.367283,
-          0.358532,
-          0.393618,
-          0.359474
+          0.359213,
+          0.353073,
+          0.34899,
+          0.399401,
+          0.357943
         ]
       },
       "pypy_version": "Python 3.10.16 (64367dfeb263, Feb 24 2025, 17:31:14)",
       "refusals": {
-        "hot_self_s": 2.700942,
+        "hot_self_s": 2.679777,
         "native_self_s": 0.0,
         "reasons": [
           {
@@ -469,7 +449,7 @@
               "KeywordTree.search_lss"
             ],
             "reason": "method: field self._zero_state has no scalar or int/float list kind",
-            "self_s": 2.695147
+            "self_s": 2.674377
           },
           {
             "functions": [
@@ -477,21 +457,21 @@
               "KeywordTree.finalize"
             ],
             "reason": "method: field self._finalized has no scalar or int/float list kind",
-            "self_s": 0.002177
+            "self_s": 0.002114
           },
           {
             "functions": [
               "KeywordTree.search_lss_for_children"
             ],
-            "reason": "method: calls a method that",
-            "self_s": 0.002112
+            "reason": "method: calls a method that stays in CPython",
+            "self_s": 0.002068
           },
           {
             "functions": [
               "State.__init__"
             ],
             "reason": "method of a class with decorators, bases, a metaclass or class attributes",
-            "self_s": 0.001488
+            "self_s": 0.001203
           },
           {
             "functions": [
@@ -500,7 +480,7 @@
               "State"
             ],
             "reason": "no refusal recorded (not selected as a candidate)",
-            "self_s": 1.5e-05
+            "self_s": 1.3e-05
           },
           {
             "functions": [

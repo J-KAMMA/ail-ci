@@ -173,19 +173,19 @@ def normalise_reason(text):
     text = text or ''
     for tail in (', stays in CPython', ' stays in CPython'):
         if text.endswith(tail):
-            text = text[:-len(tail)]
+            return text[:-len(tail)]
     return text
 
 
 def refusal_ranking(profile_path, hot_path, report):
     stats = pstats.Stats(str(profile_path))
     by_name, by_line = qualname_map(hot_path)
-    hot_name = hot_path.name
+    hot_resolved = hot_path.resolve()
     rejected = {k: normalise_reason(v) for k, v in (report.get('rejected') or {}).items()}
     accelerated = set(report.get('accelerated') or [])
     per_qual = {}
     for (fn, line, name), (_cc, _nc, tt, _ct, _callers) in stats.stats.items():
-        if Path(fn).name != hot_name:
+        if Path(fn).resolve() != hot_resolved:
             continue
         qual = by_line.get((name, line))
         if qual is None:
@@ -220,6 +220,7 @@ def refusal_ranking(profile_path, hot_path, report):
 def measure_library(name, cfg, ail, work, only_steps):
     log('== %s ==' % name)
     pkg_src = package_dir(PY, cfg['package'])
+    hot_src = pkg_src / Path(cfg['hot']).relative_to(cfg['package'])
     driver_src = HERE / 'workloads' / cfg['driver']
     big = cfg['big']
     small = cfg['small']
@@ -264,7 +265,7 @@ def measure_library(name, cfg, ail, work, only_steps):
         install_hybrid(out, plain_root, cfg['hot'])
         rec['hybrid'] = median5([PY, 'driver.py'], plain_root, base_env(dict(big, **run_env(plain_root))),
                                 expected)
-        rec['functions'] = count_functions(plain_root / cfg['hot'])
+        rec['functions'] = count_functions(hot_src)
         rec['functions']['native_plain'] = len(report.get('accelerated') or [])
         log('hybrid plain %.4f s native=%d/%d' % (rec['hybrid']['median_s'],
                                                   rec['functions']['native_plain'],
@@ -296,7 +297,7 @@ def measure_library(name, cfg, ail, work, only_steps):
         install_hybrid(out, obs_root, cfg['hot'])
         rec['observed'] = median5([PY, 'driver.py'], obs_root,
                                   base_env(dict(big, **run_env(obs_root))), expected)
-        rec['functions_observed'] = count_functions(obs_root / cfg['hot'])
+        rec['functions_observed'] = count_functions(hot_src)
         rec['functions_observed']['native_observed'] = len(report.get('accelerated') or [])
         log('hybrid obs   %.4f s native=%d/%d' % (rec['observed']['median_s'],
                                                   rec['functions_observed']['native_observed'],
@@ -307,8 +308,7 @@ def measure_library(name, cfg, ail, work, only_steps):
         p = subprocess.run([PY, '-m', 'cProfile', '-o', str(prof), 'driver.py'], cwd=str(base),
                            env=base_env(big), capture_output=True, text=True, timeout=TIME_LIMIT)
         if p.returncode == 0 and prof.is_file():
-            hot_original = pkg_src / Path(cfg['hot']).relative_to(cfg['package'])
-            rec['refusals'] = refusal_ranking(prof, hot_original, report)
+            rec['refusals'] = refusal_ranking(prof, hot_src, report)
             log('refusals: ' + '; '.join('%s (%.3fs)' % (r['reason'][:52], r['self_s'])
                                          for r in rec['refusals']['reasons'][:4]))
 

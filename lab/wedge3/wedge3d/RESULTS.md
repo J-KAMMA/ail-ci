@@ -9,9 +9,9 @@ with CPython before its time was recorded.
 
 ## Headline
 
-**The observed-type hybrid accelerated nothing on either real library: 0 of 61 dateutil definitions
-and 0 of 20 ahocorapy definitions, with or without observed kinds, so it ran at CPython speed while
-the native rewrites ran 7.5x and 8.4x faster.**
+**The observed-type hybrid accelerated nothing on either real library: 0 of 58 dateutil definitions
+and 0 of 17 ahocorapy definitions, with or without observed kinds, so it ran at CPython speed while
+the native rewrites ran 7.5x and 8.1x faster.**
 
 ## 1. Workloads
 
@@ -34,12 +34,12 @@ module; `hybrid+obs` is the same build after `ail_observe.py run --fast` and
 
 | library | hot module | defs / top-level / methods | native hybrid | native hybrid+obs | CPython s | PyPy s | hybrid s | hybrid+obs s | native s | hybrid/CPython | hybrid/PyPy | hybrid/native | obs/CPython | obs/PyPy | obs/native |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| python-dateutil | `dateutil/parser/_parser.py` | 61 / 4 / 54 | 0 | 0 | 1.1174 | 1.0785 | 1.1297 | 1.1282 | 0.1491 | 1.011x | 1.047x | 7.577x | 1.010x | 1.046x | 7.567x |
-| ahocorapy | `ahocorapy/keywordtree.py` | 20 / 2 / 17 | 0 | 0 | 1.2366 | 0.3673 | 1.2467 | 1.2234 | 0.1492 | 1.008x | 3.394x | 8.355x | 0.989x | 3.331x | 8.198x |
+| python-dateutil | `dateutil/parser/_parser.py` | 58 / 2 / 54 | 0 | 0 | 1.1046 | 1.0757 | 1.1062 | 1.1013 | 0.1468 | 1.001x | 1.028x | 7.536x | 0.997x | 1.024x | 7.502x |
+| ahocorapy | `ahocorapy/keywordtree.py` | 17 / 0 / 17 | 0 | 0 | 1.2084 | 0.3579 | 1.2094 | 1.2093 | 0.1492 | 1.001x | 3.379x | 8.103x | 1.001x | 3.379x | 8.103x |
 
 The hybrid rows are noise around 1.0x: `build.json` lists `"accelerated": []` in all four builds
 (plain and observed, both libraries), so no function ever entered native code.  PyPy is about equal
-to CPython on dateutil and 3.4x faster on ahocorapy; the native rewrites are 7.5x and 8.4x faster
+to CPython on dateutil and 3.4x faster on ahocorapy; the native rewrites are 7.5x and 8.1x faster
 than the hybrid.  The observed recorder ran over the same package copies and annotated the hot
 module, but it changed no selection (0 -> 0); the annotated module still produced byte-identical
 output before it was rebuilt (`annotated_output_matches: true`).
@@ -48,7 +48,7 @@ output before it was rebuilt (`annotated_output_matches: true`).
 
 `cProfile` on the CPython driver gives each hot-module function's self time; a function the hybrid
 did not wrap is charged to the reason in `build.json` (or to "no refusal recorded" when the build
-never produced a candidate).  The profiled hot-module self time is 2.447 s for dateutil and 2.701 s
+never produced a candidate).  The profiled hot-module self time is 2.473 s for dateutil and 2.680 s
 for ahocorapy, larger than the wall times above because cProfile adds per-call overhead; the
 numbers rank reasons, they are not shares of wall time.
 
@@ -56,10 +56,10 @@ numbers rank reasons, they are not shares of wall time.
 
 | # | reason | self s | funcs | example functions |
 | ---: | --- | ---: | ---: | --- |
-| 1 | method of a class with decorators, bases, a metaclass or class attributes | 2.2815 | 34 | `_timelex.get_token`, `_timelex.isnum`, `_ymd.resolve_ymd`, `parserinfo.month` |
-| 2 | no refusal recorded (not selected as a candidate) | 0.0774 | 32 | `<genexpr>`, `__getitem__`, `_escape`, `_parse_flags` |
+| 1 | method of a class with decorators, bases, a metaclass or class attributes | 2.3070 | 34 | `_timelex.get_token`, `_timelex.isnum`, `_ymd.resolve_ymd`, `parserinfo.month` |
+| 2 | no refusal recorded (not selected as a candidate) | 0.0778 | 12 | `<genexpr>`, `_timelex`, `_ymd`, `parserinfo` |
 | 3 | a decorated, dunder or non-plain-signature method | 0.0648 | 2 | `_resultbase.__init__`, `_resultbase.__len__` |
-| 4 | not a typed candidate | 0.0235 | 1 | `parse` |
+| 4 | not a typed candidate | 0.0236 | 1 | `parse` |
 
 The hot path is the `_timelex` tokenizer and the `parser._parse` family; every one is a method of a
 class that has bases, decorators or class attributes, so the method pass refuses it before the type
@@ -70,13 +70,13 @@ shape gate is structural and the `parse` refusal is at the candidate stage.
 
 | # | reason | self s | funcs | example functions |
 | ---: | --- | ---: | ---: | --- |
-| 1 | method: field `self._zero_state` has no scalar or int/float list kind | 2.6951 | 4 | `_search_all_string`, `_search_all_generic`, `_precompute_outputs`, `search_lss` |
-| 2 | method: field `self._finalized` has no scalar or int/float list kind | 0.0022 | 2 | `add`, `finalize` |
+| 1 | method: field `self._zero_state` has no scalar or int/float list kind | 2.6744 | 4 | `_compile_skip_pattern`, `_search_all_string`, `_precompute_outputs`, `search_lss` |
+| 2 | method: field `self._finalized` has no scalar or int/float list kind | 0.0021 | 2 | `add`, `finalize` |
 | 3 | method: calls a method that stays in CPython | 0.0021 | 1 | `search_lss_for_children` |
-| 4 | method of a class with decorators, bases, a metaclass or class attributes | 0.0015 | 1 | `State.__init__` |
-| 5 | method: field `self._case_insensitive` has no scalar or int/float list kind | 0.0000 | 1 | `search_all` |
+| 4 | method of a class with decorators, bases, a metaclass or class attributes | 0.0012 | 1 | `State.__init__` |
+| 5 | no refusal recorded (not selected as a candidate) | 0.0000 | 3 | `<module>`, `KeywordTree`, `State` |
 | 6 | a decorated, dunder or non-plain-signature method | 0.0000 | 1 | `KeywordTree.__init__` |
-| 7 | no refusal recorded (not selected as a candidate) | 0.0000 | 3 | `<module>`, `KeywordTree`, `State` |
+| 7 | method: field `self._case_insensitive` has no scalar or int/float list kind | 0.0000 | 1 | `search_all` |
 
 The whole search loop is blocked by one field: the automaton's `_zero_state` is a `State` object,
 not a scalar or an int/float list, and its transitions are a dict of `State` objects.  The class
