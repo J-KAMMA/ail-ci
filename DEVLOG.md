@@ -8,8 +8,9 @@ to the first reason `build.json` gives. Time is CPython cProfile self time on th
 All 519 definitions were refused: **0 native in both builds**. The first-refusal table is dominated
 by `not a typed candidate` (271 defs, 57.0% of the 11.622 s built-module self time) and
 `method: class shape` (207 defs, 40.0%); the third is `method: field kind not expressible` (15 defs,
-1.5%). The first two cover 97.0% of the profiled time. Observed kinds changed the first reason of
-only 2 of 519 defs (both sqlparse) and added no native function. `lab/refuse1/RESULTS.md` has the
+1.5%). The first two cover 97.0% of the profiled time. Observed kinds changed the raw first refusal
+of 3 of 519 defs (all sqlparse; 2 distinct grouped reasons) and added no native function.
+`lab/refuse1/RESULTS.md` has the
 per-library split and the cost estimate for each of the top three; `results.json` has every
 definition's raw reason and self time. No new test module. Tests: `test_ail_safetynet`,
 `test_ail_files`, `test_ail_corpus_findings3` on the final commit.

@@ -3,9 +3,14 @@
 wedge3/wedge3b hot modules, with and without observed kinds, weighted by CPython cProfile time.
 
 Measurement only: no compiler or library source is changed.  The hybrid is the obs5 worktree
-(`REFUSE_AIL`, default `../obs5/AIL_CURRENT`).  Libraries are pip-installed into throw-away venvs
-from the pins recorded in `lab/wedge3/` and `lab/wedge3/wedge3b/`; their source is never vendored.
+(`REFUSE_AIL`, default `../obs5/AIL_CURRENT`).  This script does not create venvs or install
+anything: create them from the local pins `requirements.txt` and `requirements-wedge3b.txt` (see
+`RESULTS.md`, Reproduce), then pass their interpreters in `REFUSE_CPY3` / `REFUSE_CPY3B`.  Library
+source is never vendored.
 
+    python3 -m venv /tmp/r1/v3 && /tmp/r1/v3/bin/pip install -r lab/refuse1/requirements.txt
+    python3 -m venv /tmp/r1/v3b && /tmp/r1/v3b/bin/pip install --no-binary pydantic \
+        -r lab/refuse1/requirements-wedge3b.txt
     REFUSE_CPY3=/tmp/r1/v3/bin/python REFUSE_CPY3B=/tmp/r1/v3b/bin/python \
         python3 lab/refuse1/measure.py -o lab/refuse1/results.json
 
@@ -421,7 +426,10 @@ def make_tables(results):
 
 
 def reason_changes(results):
-    """Functions whose first refusal gate changed when observed kinds were written in."""
+    """Functions whose grouped first refusal gate changed when observed kinds were written in.
+
+    Raw reason text (which names the field or callee) can change without changing this group;
+    `functions[cfg][].reason_raw` in the output keeps the raw text for both builds."""
     out = []
     for name, rec in results['pairs'].items():
         plain = {(r['module'], r['qualname']): r for r in rec['functions']['plain']}

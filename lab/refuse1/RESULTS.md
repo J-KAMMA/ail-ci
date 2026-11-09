@@ -11,8 +11,10 @@ run 2026-11-09 on a 4-core GitHub Actions runner (16 GB), CPython 3.12.3.
 The five wedge3 pairs (networkx, jsonschema, chardet, tomli, difflib) and the two wedge3b pairs
 (pydantic 1.10.27 pure, sqlparse 0.6.1) use the same hot modules and the same workload files as
 those jobs (the copies in `workloads/` are byte-identical to the files on branches
-`job-wedge3-11091201` / `job-wedge3b-11091226`). The libraries are pip-installed from those pins
-into throw-away venvs (`REFUSE_CPY3`, `REFUSE_CPY3B`); no library source is vendored.
+`job-wedge3-11091201` / `job-wedge3b-11091226`). The pins are copied into this directory
+(`requirements.txt`, `requirements-wedge3b.txt`) and installed into throw-away venvs
+(`REFUSE_CPY3`, `REFUSE_CPY3B`); the script does not create or install the venvs itself, and no
+library source is vendored.
 
 For every module the script does two builds with `ail build --cpython`:
 
@@ -96,9 +98,12 @@ Per library (plain build; time is hot-module cProfile self time, `units` is defi
    already cover 97.0%, so this third place is small: the next reason after it, decorated/dunder
    methods, is only 0.9%.
 
-**Observed kinds do not change the answer.** `annotate` changed the first refusal of only 2 of the
-519 definitions, both sqlparse (`ReindentFilter._process_identifierlist` moved from field-kind to
-self-use, `_process_values` from field-kind to calls-CPython), and changed **0 native functions**.
+**Observed kinds do not change the answer.** `annotate` changed the raw first-refusal text of **3**
+of the 519 definitions, all sqlparse: `ReindentFilter._get_offset` (`self.char` ->
+`self.leading_ws`, both still `method: field kind not expressible`), `_process_identifierlist`
+(field-kind -> self-use), and `_process_values` (field-kind -> calls-CPython). Folded to the
+grouped gates, that is **2** changes (`_get_offset` stays in the same group), and either way
+**0 native functions** were added.
 Pydantic is already annotated (`Any` is kept), and the untyped libraries' observed kinds are
 `None`, unions, containers and user objects, which are precisely the kinds the ABI cannot carry.
 This matches the wedge3/wedge3b conclusion: the blocker is the unit/kind selection, not missing
@@ -107,14 +112,20 @@ annotations.
 ## Reproduce
 
 ```sh
-pip install -r lab/wedge3/requirements.txt          # into REFUSE_CPY3
-pip install --no-binary pydantic pydantic==1.10.27 sqlparse==0.6.1   # into REFUSE_CPY3B
+python3 -m venv /tmp/r1/v3
+/tmp/r1/v3/bin/pip install -r lab/refuse1/requirements.txt
+python3 -m venv /tmp/r1/v3b
+/tmp/r1/v3b/bin/pip install --no-binary pydantic -r lab/refuse1/requirements-wedge3b.txt
 REFUSE_CPY3=/tmp/r1/v3/bin/python REFUSE_CPY3B=/tmp/r1/v3b/bin/python \
   python3 lab/refuse1/measure.py -o lab/refuse1/results.json
 ```
 
-`results.json` holds the per-definition raw reason and self time for both builds, the per-library
-totals, the grouped tables and the 2 plain-to-observed reason changes.
+The two pins files are copies of the branch files named above (only the header comments and the
+self-referencing filename differ), so no fetching of an unmerged branch is required. `measure.py` does not create the venvs or install the pins; it only
+uses the two interpreters passed in `REFUSE_CPY3` / `REFUSE_CPY3B`. `results.json` holds the
+per-definition raw reason and self time for both builds, the per-library totals, the grouped
+tables and the `reason_changes_plain_to_obs` list (2 grouped gates; the raw-reason change count is
+3 because `_get_offset` changes its raw field name within one group).
 
 ## What is not measured
 
@@ -140,5 +151,6 @@ field-write-back reason for `Store.bump`, and its generated `_run.py` prints the
 CPython. The measurement was checked end to end: 40 hybrid builds (20 modules x plain/observed),
 all returned a `build.json`; all 519 definitions received either a `native` entry or a
 `build.json` refusal in both builds; native counts are 0 in both. `results.json` is the output of
-the committed script, and the two observed-kind reason changes were re-read from it. The required
+the committed script, and the observed-kind changes (3 raw reasons, 2 grouped gates) were re-read
+from it. The required
 repository tests are run on the final commit.
