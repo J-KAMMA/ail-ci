@@ -1,362 +1,397 @@
 import sys
 
 
-def fail(line_no, cat, status):
-    sys.stdout.write("line {}: {}\n".format(line_no, cat))
-    sys.exit(status)
-
-
-def to_int(b):
-    n = 0
-    for c in b:
-        n = n * 10 + (c - 48)
-    return n
-
-
-def is_digits(b):
-    for c in b:
+def digits_ok(s, lo, hi):
+    n = len(s)
+    if n < lo or n > hi:
+        return False
+    i = 0
+    while i < n:
+        c = s[i]
         if c < 48 or c > 57:
             return False
+        i = i + 1
     return True
 
 
-def digits_len(b, lo, hi):
-    if len(b) < lo or len(b) > hi:
+def to_int(s):
+    v = 0
+    i = 0
+    n = len(s)
+    while i < n:
+        v = v * 10 + (s[i] - 48)
+        i = i + 1
+    return v
+
+
+def bstr(s):
+    r = []
+    i = 0
+    n = len(s)
+    while i < n:
+        r.append(chr(s[i]))
+        i = i + 1
+    return "".join(r)
+
+
+def venue_ok(s):
+    if len(s) != 3:
         return False
-    return is_digits(b)
-
-
-def no_leading_zero(b):
-    return len(b) == 1 or b[0] != 48
-
-
-def syn_venue_code(f):
-    if len(f) != 3:
-        return False
-    for c in f:
+    i = 0
+    while i < 3:
+        c = s[i]
         if c < 65 or c > 90:
             return False
+        i = i + 1
     return True
 
 
-def syn_name(f):
-    if len(f) < 1 or len(f) > 40:
+def name_ok(s):
+    n = len(s)
+    if n < 1 or n > 40:
         return False
-    for c in f:
-        if c < 0x20 or c > 0x7e or c == 0x7c:
+    if s[0] == 32 or s[n - 1] == 32:
+        return False
+    i = 0
+    while i < n:
+        c = s[i]
+        if c < 32 or c > 126 or c == 124:
             return False
-    return f[0] != 0x20 and f[-1] != 0x20
-
-
-def syn_capacity(f):
-    return digits_len(f, 1, 6)
-
-
-def val_capacity(f):
-    if not no_leading_zero(f):
-        return False
-    v = to_int(f)
-    return 1 <= v <= 100000
-
-
-def syn_event(f):
-    return digits_len(f, 6, 6)
-
-
-def val_event(f):
-    ds = [c - 48 for c in f]
-    return (3 * ds[0] + ds[1] + 3 * ds[2] + ds[3] + 3 * ds[4] + ds[5]) % 10 == 0
-
-
-def syn_date(f):
-    if len(f) != 10:
-        return False
-    if f[4] != 45 or f[7] != 45:
-        return False
-    for i in (0, 1, 2, 3, 5, 6, 8, 9):
-        c = f[i]
-        if c < 48 or c > 57:
-            return False
+        i = i + 1
     return True
 
 
-def val_date(f):
-    y = to_int(f[0:4])
-    m = to_int(f[5:7])
-    d = to_int(f[8:10])
+def date_syntax(s):
+    if len(s) != 10:
+        return False
+    if s[4] != 45 or s[7] != 45:
+        return False
+    if not digits_ok(s[0:4], 4, 4):
+        return False
+    if not digits_ok(s[5:7], 2, 2):
+        return False
+    if not digits_ok(s[8:10], 2, 2):
+        return False
+    return True
+
+
+def date_value_ok(s):
+    y = to_int(s[0:4])
     if y < 2000 or y > 2099:
         return False
-    if m < 1 or m > 12:
+    mo = to_int(s[5:7])
+    if mo < 1 or mo > 12:
         return False
-    if m == 2:
-        if y % 4 == 0:
-            last = 29
-        else:
-            last = 28
-    elif m == 4 or m == 6 or m == 9 or m == 11:
-        last = 30
-    else:
-        last = 31
-    return 1 <= d <= last
-
-
-def syn_time(f):
-    if len(f) != 5:
+    dims = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if y % 4 == 0:
+        dims[1] = 29
+    da = to_int(s[8:10])
+    if da < 1 or da > dims[mo - 1]:
         return False
-    if f[2] != 58:
-        return False
-    for i in (0, 1, 3, 4):
-        c = f[i]
-        if c < 48 or c > 57:
-            return False
     return True
 
 
-def val_time(f):
-    h = to_int(f[0:2])
-    m = to_int(f[3:5])
-    return 0 <= h <= 23 and 0 <= m <= 59
+def time_syntax(s):
+    if len(s) != 5:
+        return False
+    if s[2] != 58:
+        return False
+    if not digits_ok(s[0:2], 2, 2):
+        return False
+    if not digits_ok(s[3:5], 2, 2):
+        return False
+    return True
 
 
-def syn_price(f):
-    dot = f.find(b'.')
+def time_value_ok(s):
+    hh = to_int(s[0:2])
+    mm = to_int(s[3:5])
+    if hh > 23 or mm > 59:
+        return False
+    return True
+
+
+def price_syntax(s):
+    n = len(s)
+    dot = -1
+    i = 0
+    while i < n:
+        if s[i] == 46:
+            if dot != -1:
+                return False
+            dot = i
+        i = i + 1
     if dot < 1 or dot > 4:
         return False
-    if len(f) != dot + 3:
+    if n != dot + 3:
         return False
-    for c in f[:dot]:
-        if c < 48 or c > 57:
-            return False
-    for c in f[dot + 1:]:
-        if c < 48 or c > 57:
-            return False
+    if not digits_ok(s[0:dot], dot, dot):
+        return False
+    if not digits_ok(s[dot + 1:n], 2, 2):
+        return False
     return True
 
 
-def val_price(f):
-    dot = f.find(b'.')
-    p1 = f[:dot]
-    if not no_leading_zero(p1):
+def price_cents(s):
+    n = len(s)
+    dot = 0
+    while dot < n:
+        if s[dot] == 46:
+            break
+        dot = dot + 1
+    dollars = s[0:dot]
+    if len(dollars) > 1 and dollars[0] == 48:
+        return -1
+    total = to_int(dollars) * 100 + to_int(s[dot + 1:n])
+    if total % 5 != 0:
+        return -1
+    return total
+
+
+def seat_syntax(s):
+    n = len(s)
+    if n < 2 or n > 4:
         return False
-    cents = to_int(p1) * 100 + to_int(f[dot + 1:])
-    return cents % 5 == 0
-
-
-def syn_seat(f):
-    if len(f) < 2 or len(f) > 4:
+    c = s[0]
+    if c < 65 or c > 90:
         return False
-    if f[0] < 65 or f[0] > 90:
+    return digits_ok(s[1:n], 1, 3)
+
+
+def seat_num(s):
+    n = len(s)
+    ds = s[1:n]
+    if len(ds) > 1 and ds[0] == 48:
+        return -1
+    v = to_int(ds)
+    if v < 1 or v > 999:
+        return -1
+    return v
+
+
+def buyer_syntax(s):
+    n = len(s)
+    if n < 4 or n > 12:
         return False
-    for c in f[1:]:
-        if c < 48 or c > 57:
-            return False
-    return True
-
-
-def val_seat(f):
-    nums = f[1:]
-    if not no_leading_zero(nums):
-        return False
-    return to_int(nums) >= 1
-
-
-def syn_buyer(f):
-    if len(f) < 4 or len(f) > 12:
-        return False
-    c = f[0]
+    c = s[0]
     if c < 97 or c > 122:
         return False
-    for c in f[1:]:
-        if (c < 97 or c > 122) and (c < 48 or c > 57):
+    i = 1
+    while i < n:
+        c = s[i]
+        if not ((c >= 97 and c <= 122) or (c >= 48 and c <= 57)):
             return False
+        i = i + 1
     return True
 
 
-def syn_count(f):
-    return digits_len(f, 1, 9)
+def checksum_ok(ev):
+    total = (3 * (ev[0] - 48) + (ev[1] - 48) + 3 * (ev[2] - 48)
+             + (ev[3] - 48) + 3 * (ev[4] - 48) + (ev[5] - 48))
+    return total % 10 == 0
 
 
-def val_count(f):
-    return no_leading_zero(f)
-
-
-def syn_cents(f):
-    return digits_len(f, 1, 12)
-
-
-def val_cents(f):
-    return no_leading_zero(f)
-
-
-def money(cents):
-    return "{}.{:02d}".format(cents // 100, cents % 100)
+def money(c):
+    return "%d.%02d" % (c // 100, c % 100)
 
 
 def main():
     if len(sys.argv) != 2:
-        sys.exit(1)
-
+        return 1
     try:
-        with open(sys.argv[1], 'rb') as fh:
-            data = fh.read()
+        f = open(sys.argv[1], "rb")
+        data = f.read()
+        f.close()
     except Exception:
-        sys.exit(1)
+        return 1
 
-    lines = data.split(b'\n')
-    if lines and lines[-1] == b'':
-        lines.pop()
+    lines = data.split(b"\n")
+    if data.endswith(b"\n"):
+        lines = lines[:len(lines) - 1]
 
-    if len(lines) == 0 or lines[0] != b'TKT/1':
-        fail(1, "header", 2)
+    if len(lines) == 0 or lines[0] != b"TKT/1":
+        sys.stdout.write("line 1: header\n")
+        return 2
 
     venues = {}
     events = {}
     sold = {}
+    nv = 0
+    ne = 0
+    ns = 0
+    nr = 0
     revenue = 0
-    rec_count = 0
-    s_count = 0
-    r_count = 0
-    nlines = len(lines)
-    i = 1
+    recs = 0
 
-    while i < nlines:
-        line_no = i + 1
-        parts = lines[i].split(b'|')
+    def fail(ln, cat, status):
+        sys.stdout.write("line %d: %s\n" % (ln, cat))
+        sys.exit(status)
+
+    end_seen = False
+    nlines = len(lines)
+    idx = 1
+    while idx < nlines:
+        ln = idx + 1
+        parts = lines[idx].split(b"|")
         typ = parts[0]
 
-        if typ == b'V':
+        if typ == b"V":
             if len(parts) != 4:
-                fail(line_no, "syntax", 3)
+                fail(ln, "syntax", 3)
             code = parts[1]
-            name = parts[2]
+            nm = parts[2]
             cap = parts[3]
-            if not syn_venue_code(code) or not syn_name(name) or not syn_capacity(cap):
-                fail(line_no, "syntax", 3)
-            if not val_capacity(cap):
-                fail(line_no, "value", 4)
-            if code in venues:
-                fail(line_no, "duplicate", 6)
-            venues[code] = to_int(cap)
-            rec_count += 1
+            if not venue_ok(code) or not name_ok(nm) or not digits_ok(cap, 1, 6):
+                fail(ln, "syntax", 3)
+            if len(cap) > 1 and cap[0] == 48:
+                fail(ln, "value", 4)
+            capv = to_int(cap)
+            if capv < 1 or capv > 100000:
+                fail(ln, "value", 4)
+            code_s = bstr(code)
+            if code_s in venues:
+                fail(ln, "duplicate", 6)
+            venues[code_s] = capv
+            nv = nv + 1
+            recs = recs + 1
 
-        elif typ == b'E':
+        elif typ == b"E":
             if len(parts) != 6:
-                fail(line_no, "syntax", 3)
+                fail(ln, "syntax", 3)
             ev = parts[1]
             vc = parts[2]
             dt = parts[3]
             tm = parts[4]
             pr = parts[5]
-            if not syn_event(ev) or not syn_venue_code(vc) or not syn_date(dt) or not syn_time(tm) or not syn_price(pr):
-                fail(line_no, "syntax", 3)
-            if not val_event(ev) or not val_date(dt) or not val_time(tm) or not val_price(pr):
-                fail(line_no, "value", 4)
-            if vc not in venues:
-                fail(line_no, "reference", 5)
-            if ev in events:
-                fail(line_no, "duplicate", 6)
-            dot = pr.find(b'.')
-            cents = to_int(pr[:dot]) * 100 + to_int(pr[dot + 1:])
-            events[ev] = (vc, cents)
-            sold[ev] = set()
-            rec_count += 1
+            if (not digits_ok(ev, 6, 6) or not venue_ok(vc)
+                    or not date_syntax(dt) or not time_syntax(tm)
+                    or not price_syntax(pr)):
+                fail(ln, "syntax", 3)
+            if not checksum_ok(ev):
+                fail(ln, "value", 4)
+            if not date_value_ok(dt):
+                fail(ln, "value", 4)
+            if not time_value_ok(tm):
+                fail(ln, "value", 4)
+            pc = price_cents(pr)
+            if pc < 0:
+                fail(ln, "value", 4)
+            ev_s = bstr(ev)
+            vc_s = bstr(vc)
+            if vc_s not in venues:
+                fail(ln, "reference", 5)
+            if ev_s in events:
+                fail(ln, "duplicate", 6)
+            events[ev_s] = [vc_s, pc]
+            sold[ev_s] = set()
+            ne = ne + 1
+            recs = recs + 1
 
-        elif typ == b'S':
+        elif typ == b"S":
             if len(parts) != 4:
-                fail(line_no, "syntax", 3)
+                fail(ln, "syntax", 3)
             ev = parts[1]
-            seat = parts[2]
-            buyer = parts[3]
-            if not syn_event(ev) or not syn_seat(seat) or not syn_buyer(buyer):
-                fail(line_no, "syntax", 3)
-            if not val_event(ev) or not val_seat(seat):
-                fail(line_no, "value", 4)
-            if ev not in events:
-                fail(line_no, "reference", 5)
-            if seat in sold[ev]:
-                fail(line_no, "duplicate", 6)
-            vc = events[ev][0]
-            if len(sold[ev]) >= venues[vc]:
-                fail(line_no, "capacity", 7)
-            sold[ev].add(seat)
-            revenue += events[ev][1]
-            s_count += 1
-            rec_count += 1
+            st = parts[2]
+            by = parts[3]
+            if not digits_ok(ev, 6, 6) or not seat_syntax(st) or not buyer_syntax(by):
+                fail(ln, "syntax", 3)
+            if not checksum_ok(ev):
+                fail(ln, "value", 4)
+            if seat_num(st) < 0:
+                fail(ln, "value", 4)
+            ev_s = bstr(ev)
+            st_s = bstr(st)
+            if ev_s not in events:
+                fail(ln, "reference", 5)
+            if st_s in sold[ev_s]:
+                fail(ln, "duplicate", 6)
+            capv = venues[events[ev_s][0]]
+            if len(sold[ev_s]) >= capv:
+                fail(ln, "capacity", 7)
+            sold[ev_s].add(st_s)
+            revenue = revenue + events[ev_s][1]
+            ns = ns + 1
+            recs = recs + 1
 
-        elif typ == b'R':
+        elif typ == b"R":
             if len(parts) != 3:
-                fail(line_no, "syntax", 3)
+                fail(ln, "syntax", 3)
             ev = parts[1]
-            seat = parts[2]
-            if not syn_event(ev) or not syn_seat(seat):
-                fail(line_no, "syntax", 3)
-            if not val_event(ev) or not val_seat(seat):
-                fail(line_no, "value", 4)
-            if ev not in events or seat not in sold[ev]:
-                fail(line_no, "reference", 5)
-            sold[ev].remove(seat)
-            revenue -= events[ev][1]
-            r_count += 1
-            rec_count += 1
+            st = parts[2]
+            if not digits_ok(ev, 6, 6) or not seat_syntax(st):
+                fail(ln, "syntax", 3)
+            if not checksum_ok(ev):
+                fail(ln, "value", 4)
+            if seat_num(st) < 0:
+                fail(ln, "value", 4)
+            ev_s = bstr(ev)
+            st_s = bstr(st)
+            if ev_s not in events or st_s not in sold[ev_s]:
+                fail(ln, "reference", 5)
+            sold[ev_s].discard(st_s)
+            revenue = revenue - events[ev_s][1]
+            nr = nr + 1
+            recs = recs + 1
 
-        elif typ == b'END':
+        elif typ == b"END":
             if len(parts) != 3:
-                fail(line_no, "syntax", 3)
-            cnt = parts[1]
-            cents_s = parts[2]
-            if not syn_count(cnt) or not syn_cents(cents_s):
-                fail(line_no, "syntax", 3)
-            if not val_count(cnt) or not val_cents(cents_s):
-                fail(line_no, "value", 4)
-            if to_int(cnt) != rec_count or to_int(cents_s) != revenue:
-                fail(line_no, "summary", 8)
-            if i + 1 < nlines:
-                fail(line_no + 1, "summary", 8)
-
-            out = []
-            out.append("venues {} events {} sold {} refunds {}".format(
-                len(venues), len(events), s_count, r_count))
-            out.append("revenue {}".format(money(revenue)))
-
-            vn = {}
-            vt = {}
-            vr = {}
-            for code in venues:
-                vn[code] = 0
-                vt[code] = 0
-                vr[code] = 0
-
-            for ev in events:
-                vc = events[ev][0]
-                pc = events[ev][1]
-                c = len(sold[ev])
-                vn[vc] += 1
-                vt[vc] += c
-                vr[vc] += c * pc
-
-            for code in sorted(venues):
-                out.append("{} events={} tickets={} revenue={}".format(
-                    code.decode('ascii'), vn[code], vt[code], money(vr[code])))
-
-            arr = []
-            for ev in events:
-                arr.append((-len(sold[ev]), ev))
-            arr.sort()
-
-            k = 0
-            while k < len(arr) and k < 3:
-                out.append("top {} {}".format(arr[k][1].decode('ascii'), -arr[k][0]))
-                k += 1
-
-            sys.stdout.write("\n".join(out) + "\n")
-            sys.exit(0)
+                fail(ln, "syntax", 3)
+            cs = parts[1]
+            ct = parts[2]
+            if not digits_ok(cs, 1, 9) or not digits_ok(ct, 1, 12):
+                fail(ln, "syntax", 3)
+            if len(cs) > 1 and cs[0] == 48:
+                fail(ln, "value", 4)
+            if len(ct) > 1 and ct[0] == 48:
+                fail(ln, "value", 4)
+            if to_int(cs) != recs or to_int(ct) != revenue:
+                fail(ln, "summary", 8)
+            end_seen = True
+            if idx + 1 < nlines:
+                fail(idx + 2, "summary", 8)
+            break
 
         else:
-            fail(line_no, "syntax", 3)
+            fail(ln, "syntax", 3)
 
-        i += 1
+        idx = idx + 1
 
-    fail(nlines + 1, "summary", 8)
+    if not end_seen:
+        fail(nlines + 1, "summary", 8)
+
+    out = []
+    out.append("venues %d events %d sold %d refunds %d" % (nv, ne, ns, nr))
+    out.append("revenue %s" % money(revenue))
+
+    codes = []
+    for c in venues:
+        codes.append(c)
+    codes.sort()
+    for code in codes:
+        nev = 0
+        tick = 0
+        rev = 0
+        for e in events:
+            info = events[e]
+            if info[0] == code:
+                nev = nev + 1
+                cnt = len(sold[e])
+                tick = tick + cnt
+                rev = rev + cnt * info[1]
+        out.append("%s events=%d tickets=%d revenue=%s" % (code, nev, tick, money(rev)))
+
+    tl = []
+    for e in events:
+        tl.append((-len(sold[e]), e))
+    tl.sort()
+    k = 0
+    while k < 3 and k < len(tl):
+        out.append("top %s %d" % (tl[k][1], -tl[k][0]))
+        k = k + 1
+
+    sys.stdout.write("\n".join(out))
+    sys.stdout.write("\n")
+    return 0
 
 
-main()
+sys.exit(main())
