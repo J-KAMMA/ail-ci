@@ -262,6 +262,67 @@ needed.  The only edit is defensive: `test_ail_selfhost_parse.py` now widens the
 `len(texts) == 200`; on today's corpus the stride already yields 200, so the test is unchanged.
 Tests on the final commit: `test_ail_selfhost_parse` (5/5), `test_ail_safetynet`, `test_ail_files`,
 `test_ail_corpus_findings3`; `python3 tools/update_manifest.py` then `--check`.
+## 2026-11-08 -- rbsetord2 review fixes: set pop finger, difference heuristic, frozenset keys (job-rbsetord2_rr1-11081819)
+
+The review of the re-applied setord2 emulation found three wrong orders inherited from the accepted
+change. All are fixed in `python/pkg-v12/cruntime.py`:
+
+- **Pop finger.** `fin` is a CPython-table slot cursor when `co` is live, but `ail_setx_rebuild`
+  recomputed it from dense-entry indices and used that value, so a `pop()` followed by an `add`
+  that reused the freed dummy slot made the next `pop()` return the re-added key. The rebuild now
+  keeps the old slot cursor whenever the CPython table is live and only remaps it for the
+  insertion-order body. A table resize keeps the numeric cursor, as CPython's `set_table_resize`
+  does (it does not reset `finger`).
+- **Difference.** `ail_setx_difference` and typed `ail_iset_minus` always filtered into a fresh set.
+  They now take CPython's `set_difference` copy-and-delete path when `len(a)>>2 > len(b)`, keeping
+  a's table layout; `difference_update` follows the same layout and dummy-resize rule.
+- **Frozenset keys.** `ail_setx_det` treated a `frozenset` as non-deterministic, so a set of
+  frozensets silently fell back to insertion order. It now recurses into the frozenset's elements;
+  `ail_frozenset_hash` already reproduces CPython's deterministic mix, so those sets (and tuples
+  holding frozensets) walk and pop in CPython's order.
+
+`test_ail_setorder.py` gains S8 (pop after mutation/growth/clear), S9 (boxed and typed difference
+across both sides of the threshold) and S10 (sets of frozensets, tuples of frozensets, nested
+frozensets, empty/negative/64-bit elements). DIFFERENCES gains the review row and extends A2 /
+the setord2 row to frozensets; `tools/update_manifest.py` regenerated the `cruntime.py` and
+`test_ail_setorder.py` pins and `--check` passes (`tools/diff_ids.py` is absent on this tree).
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, general and default, all match CPython 3.12):
+`/tmp/probes/p_pop_boundary.py` (pop then add, growth, clear, difference_update dummies,
+negative/64-bit values, argument/list-item/attribute/dict-value routes, empty KeyError),
+`p_typed_pop_boundary.py` (typed growth and dummy cleanup), `p_diff_boundary.py` (both sides of
+`len(a)>>2 > len(b)`, empty/self, negatives, non-set iterable, multiple arguments, frozenset),
+`p_typed_diff_boundary.py`, `p_frozen_boundary.py` (empty/negative/64-bit leaves, bool/None/float,
+nested frozensets, tuples, routes, add/discard); the reviewer's `p_min1`, `p_finger`,
+`p_typed_finger`, `p_ops2`, `p_typed_ops` and `p_frozen_keys` also re-run 6/6 matching.
+
+Tests (`tools/par_check.py -j 2`): `test_ail_setorder`, `test_ail_sets_general`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 5 modules, 0 failed.
+
+## 2026-11-08 -- rbsetord2 re-applied: CPython set order emulation on the current tree (job-rbsetord2_rr1-11081819)
+
+Re-applied the accepted `job-setord2-11080819` change (`fd0162e..c7a948e8`) on this tree; its diff no
+longer applied because setord1 had since been integrated. The setord2 branch `job-rbsetord2-11081135`
+had no work commits, only its export. The conflict between the setord1 refusal tests and setord2's
+emulation was resolved in favour of setord2 (the change removes the refusal path for deterministic-hash
+sets); the later `setord1` singleton pop fix was superseded by the table pop. The accepted code, test,
+DIFFERENCES and `docs/spec/DIFFERENCES.md` hunks are applied; newer unrelated rows and files on this
+tree are kept.
+
+- `cruntime.py`, `pyboxed2.py`, `pyfunc.py`: CPython 3.12 set table emulation (rehash placement from
+  the original slot) and tuple-display constant folding; unannotated int/str set pop and walk rules.
+- `test_ail_setorder.py` gains the 40 x 128 growth case and six-tuple display; `test_ail_sets_general`
+  test_s3 now compares the walk with CPython.
+- `tools/diff_ids.py` is not present on this tree, so only `tools/update_manifest.py` ran; pins for
+  `cruntime.py`, `pyboxed2.py`, `pyfunc.py`, `test_ail_setorder.py` and `test_ail_sets_general.py`
+  were regenerated and `--check` passes.
+
+Final commit tests (`tools/par_check.py -j 2`): `test_ail_setorder`, `test_ail_sets_general`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 5 modules, 0 failed.
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, general and default): `p_coll2` (40 x 128 growth, deletions,
+pop), `p_typed_dense` (annotated set[int]), `p_tuple` / `p_tuple_rt` (tuple displays, empty/nested/
+float/bool/None tuples, through an argument, list item, attribute, dict value and alias), `p_pop_empty`
+(empty/singleton/tuple pop), `p_frozen`, `p_str_order_free` and `p_set_display` -- all match CPython.
 
 ## 2026-11-08 -- err2_fix1: legacy SDK discovery carries the compiler-imported error module (job-err2_fix1-11080948)
 
