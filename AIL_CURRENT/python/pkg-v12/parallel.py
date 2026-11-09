@@ -31,6 +31,9 @@ PAR_ITER = 'par_range'
 # typedpar.py's spelling: `_ail_par_range(lo, hi, workers)`, the same loop on at most `workers` threads
 # (ThreadPoolExecutor(max_workers=...).map, Pool(processes).map, joined Threads)
 PAR_ITER_CAP = '_ail_par_range'
+# fbfsum1 (D2 option b): opt-in for `acc += e` on a float accumulator.  The compile-time spelling is
+# `AIL_PAR_FSUM=fixed`; any other value (or none) keeps today's refusal in place.
+PAR_FSUM = os.environ.get('AIL_PAR_FSUM', '') == 'fixed'
 _BUILTINS = {'int': (1, 1), 'float': (1, 1), 'abs': (1, 1), 'min': (2, 2), 'max': (2, 2), 'round': (1, 1),
              'len': (1, 1), 'wrapping_add': (2, 2), 'wrapping_sub': (2, 2), 'wrapping_mul': (2, 2)}
 _ARITH = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow, ast.LShift, ast.RShift,
@@ -525,7 +528,8 @@ def _make(node, funcs, counter, U):
                          keywords=[])
     node.par = {'k': k, 'private': private, 'lo': lo_name, 'hi': hi_name, 'callees': sorted(body.callees),
                 'writes': sorted(body.writes), 'appends': list(body.appends),
-                'reductions': [(n, body.reductions[n]) for n in sorted(body.reductions)]}
+                'reductions': [(n, body.reductions[n]) for n in sorted(body.reductions)],
+                'fsum_fixed': PAR_FSUM}
     pre = [ast.Assign(targets=[ast.Name(id=lo_name, ctx=ast.Store())], value=lo),
            ast.Assign(targets=[ast.Name(id=hi_name, ctx=ast.Store())], value=hi)]
     if cap is not None:

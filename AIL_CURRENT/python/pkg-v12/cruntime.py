@@ -32072,6 +32072,61 @@ SOURCE['PARRED'] = PARRED
 REQUIRES['PARRED'] = ['PAR', 'PARN']
 
 
+# fbfsum1 (D2 option b): the fixed-order float sum, behind `AIL_PAR_FSUM=fixed`.  A parallel body that
+# does `acc += e` / `acc -= e` on a float accumulator is outlined as `fn(args, lo, hi, sums)`: it sums
+# one chunk left to right starting from -0.0 (the IEEE identity, `-0.0 + x == x` for +0.0 and -0.0 too)
+# and stores the chunk sums.  Chunks are fixed at 4096 iterations and depend only on [lo, hi), never on
+# the thread count, so the combine -- the chunk sums added to acc left to right in chunk order -- is the
+# same at every thread count; PAR's pool only decides who runs which chunk.  NaN and infinities flow as
+# any IEEE sum.  The part exists only when the opt-in is on, so a default build's program.c is unchanged.
+PARREDF = r"""
+#define AIL_FSUM_CHUNK 4096
+typedef void (*ail_fsum_fn)(void **, int64_t, int64_t, double *);
+typedef struct { ail_fsum_fn fn; void **args; int64_t lo, hi, nacc; double *sums; } ail_fsum_job;
+/* PAR's block function over chunk numbers: one block is a contiguous run of chunks. */
+static void ail_fsum_chunks(void **a, int64_t clo, int64_t chi) {
+    ail_fsum_job *J = (ail_fsum_job *)(void *)a;
+    for (int64_t c = clo; c < chi; c++) {
+        int64_t lo = J->lo + c * (int64_t)AIL_FSUM_CHUNK;
+        int64_t hi = lo + (int64_t)AIL_FSUM_CHUNK;
+        if (hi > J->hi || hi < lo) hi = J->hi;
+        J->fn(J->args, lo, hi, J->sums + c * J->nacc);
+    }
+}
+/* accp[0..nacc) are the accumulators before and after the loop. site-free: the layout is fixed, so
+   there is no timed probe prefix (it would move the chunk boundaries). */
+static void ail_par_fsum_run(ail_fsum_fn fn, void **args, int64_t lo, int64_t hi, int64_t cap,
+                             int64_t nacc, volatile double **accp) {
+    if (hi <= lo) return;
+    int64_t n = hi - lo;
+    int64_t nch = (n + (int64_t)AIL_FSUM_CHUNK - 1) / (int64_t)AIL_FSUM_CHUNK;
+    double *sums = (double *)malloc((size_t)(nch * nacc) * sizeof(double));
+    if (!sums) ail_die("out of memory");
+    ail_fsum_job J;
+    J.fn = fn; J.args = args; J.lo = lo; J.hi = hi; J.nacc = nacc; J.sums = sums;
+    int keep = ail_par_cap;
+    ail_par_cap = cap <= 0 ? 0 : cap > 256 ? 256 : (int)cap;
+    int nt = ail_par_threads_capped();
+    if (nch < 2 || nt <= 1 || ail_par_cur) {
+        ail_fsum_chunks((void **)(void *)&J, 0, nch);
+    } else {
+        __atomic_store_n(&ail_par_cap_inside, (int64_t)nt - 1, __ATOMIC_RELAXED);
+        ail_par_sched_min_block = 0;
+        ail_par_go_wide(ail_fsum_chunks, (void **)(void *)&J, 0, nch);
+        __atomic_store_n(&ail_par_cap_inside, 255, __ATOMIC_RELAXED);
+    }
+    ail_par_cap = keep;
+    for (int64_t c = 0; c < nch; c++)
+        for (int64_t j = 0; j < nacc; j++)
+            *accp[j] = *accp[j] + sums[c * nacc + j];
+    free(sums);
+}
+"""
+ORDER.insert(ORDER.index('PARRED') + 1, 'PARREDF')
+SOURCE['PARREDF'] = PARREDF
+REQUIRES['PARREDF'] = ['PAR', 'PARN', 'PARRED']
+
+
 # D3 (owner decision 2026-11-06): `out.append(v)` in a map-like parallel body. Each block appends into
 # its own buffer (the worker asks ail_par_buf_for(_lo) once per block), and after the region the buffers
 # are appended to `out` in block-start order -- equal to the sequential order because blocks are
