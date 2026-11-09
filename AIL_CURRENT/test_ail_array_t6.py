@@ -147,7 +147,8 @@ class Reference(unittest.TestCase):
         b = ta.zeros((4, 5), ta.f64)
         cases = [
             (lambda: a + b, ValueError, "ail_array: shapes differ: (2, 3) and (4, 5)"),
-            (lambda: a + ta.zeros(3, ta.f64), ValueError, "ail_array: shapes differ: (2, 3) and (3,)"),
+            # (2, 3) + (3,) is a row broadcast since job aicore1; (4,) does not broadcast
+            (lambda: a + ta.zeros(4, ta.f64), ValueError, "ail_array: shapes differ: (2, 3) and (4,)"),
             (lambda: ta.zeros(6, ta.f64) + a, ValueError, "ail_array: shapes differ: (6,) and (2, 3)"),
             (lambda: ta.matmul(a, b), ValueError, "ail_array: matmul: shapes (2, 3) and (4, 5) do not match: 3 != 4"),
             (lambda: ta.matmul(a, a), ValueError, "ail_array: matmul: shapes (2, 3) and (2, 3) do not match: 3 != 2"),
@@ -286,15 +287,16 @@ REFUSED = [
     ("slice index", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\nb = a[0, 1:2]\n", "M[i, j]"),
     ("slice assignment", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\na[0:1] = a\n", "one row at a time"),
     ("row assignment of a number", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\na[0] = 1.0\n", "1-D f64 array"),
-    ("2-D plus 1-D", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\nb = ta.zeros(3, ta.f64)\nc = a + b\n", "row broadcast"),
-    ("2-D plus int32", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\nb = ta.zeros(3, ta.int32)\nc = a + b\n", "row broadcast"),
+    # "2-D plus 1-D" (a row broadcast) and "2-D plus int32" (a run-time TypeError) are built since job aicore1
+    ("1-D in place with 2-D", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\nb = ta.zeros(3, ta.f64)\nb += a\n",
+     "in-place operator with a 1-D array"),
     ("floordiv", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\nb = a // 2\n", "write instead"),
     ("truth", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\nif a:\n    pass\n", "len(a) > 0"),
     ("shape unpure", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\nr, c = ta.sqrt(a).shape\n", "bind the operand"),
     ("attribute", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\nb = a.dtype\n", "M.T, M.shape"),
     ("bool dim", "import ail_array as ta\na = ta.zeros((True, 3), ta.f64)\n", "int length"),
     ("empty row", "import ail_array as ta\na = ta.array([[], []], ta.f64)\n", "ta.zeros((rows, 0)"),
-    ("minimum 2-D with 1-D", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\nb = ta.maximum(a, ta.zeros(3, ta.f64))\n",
+    ("minimum 2-D with 1-D int32", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\nb = ta.maximum(a, ta.zeros(3, ta.int32))\n",
      "loop over the rows"),
     ("wrapping on 2-D", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\nb = ta.wrapping_add(a, a)\n", "one row"),
     ("bare Matrix annotation", "import ail_array as ta\ndef f(a: ta.Matrix):\n    return 1\n", "ta.Matrix[ta.f64]"),

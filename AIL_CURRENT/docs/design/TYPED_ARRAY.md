@@ -255,6 +255,34 @@ This replaces the first draft of this table (sequential `k` from 0 with one accu
 - **Reductions** (`sum dot min max argmin argmax`) take 1-D arrays; a 2-D argument is `ValueError: ail_array.sum(): 2-D arrays are not built here; reduce one row: ta.sum(M[i])`. `ta.matmul` is the 2-D product.
 - **`ta.matmul(A, B)`**, both 2-D f64: `A` is `(m, k)`, `B` is `(k, n)`, the result is `(m, n)` with the order of 3.7. Errors, in this order: not two arrays: `TypeError: ail_array.matmul() needs two ail_array.Array values`; either not 2-D: `ValueError: ail_array.matmul(): needs two 2-D arrays, not shapes (3,) and (2, 3)`; dtypes differ: the standard `TypeError: ail_array: f64 matmul f32: dtypes differ; write a.astype(ta.f32) or b.astype(ta.f64)`; not f64, f32 or int32: `TypeError: ail_array.matmul(): only f64, f32 and int32 arrays are built in this version, not f16` (fdarr2; before it the text named f64 only); inner sizes differ: `ValueError: ail_array: matmul: shapes (2, 3) and (4, 5) do not match: 3 != 4`. The `@` operator is not defined on arrays (decision TA4: `dot` and `matmul` are separate functions).
 
+### 3.9 Broadcasting, axis reductions and 2-D f32 (job aicore1, 2026-11-09)
+
+Built so that an MLP forward pass and a softmax attention block are written as a torch or NumPy user writes them
+(`lab/aicore1/`). This replaces the "row broadcast is not built" and "2-D reductions are not built" rules of 3.8 for
+the cases below; everything else in 3.8 stands.
+
+- **Broadcasting**, when at least one operand of an array-array `+ - * /`, `ta.minimum` or `ta.maximum` is 2-D: NumPy's rule
+  restricted to two dimensions. A 1-D `(n,)` operand counts as a row `(1, n)`; each dimension must be equal, or 1 on one
+  side, and that side is repeated. So `(r, c) op (c,)` (a bias row), `(r, c) op (r, 1)` (a column, e.g. a row max kept
+  with `keepdims`), `(r, 1) op (1, c)` (an outer operation) and the reflected forms all work. The dtype check comes first,
+  with the standard `dtypes differ` TypeError; shapes that do not broadcast keep `ValueError: ail_array: shapes differ:
+  (2, 3) and (4,)`. An in-place operation keeps its left shape (`M += row` works, `col += M` is the ValueError). Two 1-D
+  arrays still need the same length. Every result element is the 1-D operation on the two repeated values, so the bits are
+  those of 3.1 (repeating is a copy, exact).
+- **Axis reductions** of 2-D float arrays: `ta.sum(M, axis=, keepdims=False)`, `ta.min` / `ta.max(M, axis=, keepdims=)`,
+  `ta.argmin` / `ta.argmax(M, axis=)` (an int32 array). `axis` is `0` or `1` (or `-2`, `-1`); axis 1 reduces each row,
+  axis 0 each column, and each one **is the 1-D reduction of that row or column**: `ta.sum(M, axis=1)[i]` equals
+  `ta.sum(M[i])` bit for bit, so a row sum uses the one fixed order of 3.5 with the dtype as accumulator (f32 rows sum
+  in f32; f16 rows to f32). `keepdims=True` gives shape `(r, 1)` or `(1, c)`. A row with no elements sums to `+0.0` and
+  makes `min`/`max`/`arg*` raise `ValueError: max() iterable argument is empty`. `acc=` and `order=` together with `axis=`
+  are a ValueError in the reference and refused by name by the compiler; int arrays with `axis=` are a TypeError.
+- **2-D f32 element-wise**: every operation above (and `-`, `abs`, `sqrt exp log tanh`, `clip`, scalars, in place) on a
+  2-D f32 array is the 1-D f32 operation on its row-major data: one rounding per operation, `exp` = `r_f32(exp in binary64)`.
+- **Lowering**: a 1-D operand becomes a one-row matrix; `_ail_tam_bbin` / `_ail_tams_bbin` check the shapes, repeat the
+  dimension of 1 by a copy (`_ail_tam_bc`) and run the same-shape operation; axis reductions call the 1-D function on each
+  row (`_ail_tam_rsum`, `_rext`, `_rarg`, `_keep`; axis 0 through the transposed copy). Tests:
+  `test_ail_array_aicore1.py`, cases `array_ai_cases/`.
+
 ## 4. The reference implementation
 
 ### 4.1 Shape of the file
