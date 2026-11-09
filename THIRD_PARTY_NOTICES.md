@@ -70,6 +70,13 @@ Counts:
 3.12's own `str` methods. They are data derived from CPython (PSF-2.0) inside
 an AIL-owned file; no separate file is vendored.
 
+`AIL_CURRENT/python/pkg-v12/stararity.py` holds argument-count `TypeError`
+message templates re-derived from CPython 3.12's built-in methods. They are
+data derived from CPython (PSF-2.0) inside an AIL-owned file; no separate file
+is vendored. `AIL_CURRENT/python/pkg-v12/stubsigs_table.py` is generated from
+the vendored `third_party/typeshed` by `tools/typeshed_convert.py` and is
+listed in the inventory above.
+
 ## Follow-ups
 
 - The `ailc` wheel does not yet carry the PSF notice. `packaging/ail_wheel_backend.py`
