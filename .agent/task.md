@@ -1,3 +1,8 @@
+# CONTINUATION (2026-11-10): the previous run of this job ended with FINAL VERDICT: ERROR, most likely the
+# runner time limit. Your branch already holds the earlier commits: read git log and the DEVLOG first, do NOT
+# redo finished sub-steps, finish the remaining ones, commit and push after each. Keep the run under 4 hours;
+# if a full measurement cannot fit, cut seeds/sizes and say so in the report.
+
 **Re-apply an accepted change on top of the current tree.** Job `shparse2` was accepted, but its diff no longer applies here. Fetch it anonymously: `git fetch https://github.com/J-KAMMA/ail-ci.git job-shparse2-11091931`. Its change is `git diff 6db6e7b9d213fa88ad068cacdba0075f0d0f6ee0 FETCH_HEAD -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json'`.
 
 Apply the same change to this tree, resolving conflicts by keeping both sides' fixes. Then run `python3 tools/diff_ids.py` and `python3 tools/update_manifest.py`, run the test modules the change touches plus `test_ail_safetynet`, and commit. Change nothing else.
