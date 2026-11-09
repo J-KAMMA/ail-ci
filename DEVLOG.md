@@ -1,3 +1,20 @@
+## 2026-11-09 -- refuse1: first hybrid refusal for all 519 hot-module defs (job-refuse1-11091608)
+
+Measurement only; no compiler or library source changed. `lab/refuse1/measure.py` builds the same
+wedge3/wedge3b hot modules twice with the obs5 hybrid (commit `69e2dcd0`, `../obs5/AIL_CURRENT`),
+without and with observed kinds, and charges every direct top-level def and top-level-class method
+to the first reason `build.json` gives. Time is CPython cProfile self time on the same workloads.
+
+All 519 definitions were refused: **0 native in both builds**. The first-refusal table is dominated
+by `not a typed candidate` (271 defs, 57.0% of the 11.622 s built-module self time) and
+`method: class shape` (207 defs, 40.0%); the third is `method: field kind not expressible` (15 defs,
+1.5%). The first two cover 97.0% of the profiled time. Observed kinds changed the raw first refusal
+of 3 of 519 defs (all sqlparse; 2 distinct grouped reasons) and added no native function.
+`lab/refuse1/RESULTS.md` has the
+per-library split and the cost estimate for each of the top three; `results.json` has every
+definition's raw reason and self time. No new test module. Tests: `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` on the final commit.
+
 ## 2026-11-08 -- fz243: the reported seed does not reproduce on this tree; no code changed (job-fz243-11090607)
 
 The daily fuzzer (run 42517310228, seed `2076519205`, CPython 3.12, modes default+ir) recorded
