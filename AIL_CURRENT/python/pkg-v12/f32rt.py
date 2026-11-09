@@ -180,6 +180,43 @@ static float ailz_block(const unsigned char *a, const unsigned char *e, int64_t 
     l[1] = ailz_fix(l[1] + l[3]);
     return ailz_fix(l[0] + l[1]);
 }
+#ifdef AILZ_VEC
+/* the f32 dot block of ailz_block (prod 1) for two vectors e0, e1 against the same a: the vector loop shares the loads of a;
+   the scalar tail and the tree are ailz_block's, done for each column, so each result is ailz_block's bit for bit */
+static float ailz_block_tail(float *l, const unsigned char *a, const unsigned char *e, int64_t k, int64_t t) {
+    while (k < t) {
+        for (int y = 0; y < 16; y++) {
+            float v = -0.0f;
+            if (k + y < t) v = ailz_fix(ailz_ld(a, k + y) * ailz_ld(e, k + y));
+            l[y] = ailz_fix(l[y] + v);
+        }
+        k += 16;
+    }
+    for (int y = 0; y < 8; y++) l[y] = ailz_fix(l[y] + l[y + 8]);
+    for (int y = 0; y < 4; y++) l[y] = ailz_fix(l[y] + l[y + 4]);
+    l[0] = ailz_fix(l[0] + l[2]);
+    l[1] = ailz_fix(l[1] + l[3]);
+    return ailz_fix(l[0] + l[1]);
+}
+static void ailz_block2(const unsigned char *a, const unsigned char *e0, const unsigned char *e1, int64_t s, int64_t t,
+                        float *r0, float *r1) {
+    float l[16], h[16];
+    int64_t k = s;
+    ailz_v4f L0 = {-0.0f, -0.0f, -0.0f, -0.0f}, L1 = L0, L2 = L0, L3 = L0, H0 = L0, H1 = L0, H2 = L0, H3 = L0;
+    for (; k + 16 <= t; k += 16) {
+        ailz_v4f a0 = ailz_vld(a + 4 * k), a1 = ailz_vld(a + 4 * k + 16), a2 = ailz_vld(a + 4 * k + 32),
+                 a3 = ailz_vld(a + 4 * k + 48);
+        L0 = L0 + a0 * ailz_vld(e0 + 4 * k); L1 = L1 + a1 * ailz_vld(e0 + 4 * k + 16);
+        L2 = L2 + a2 * ailz_vld(e0 + 4 * k + 32); L3 = L3 + a3 * ailz_vld(e0 + 4 * k + 48);
+        H0 = H0 + a0 * ailz_vld(e1 + 4 * k); H1 = H1 + a1 * ailz_vld(e1 + 4 * k + 16);
+        H2 = H2 + a2 * ailz_vld(e1 + 4 * k + 32); H3 = H3 + a3 * ailz_vld(e1 + 4 * k + 48);
+    }
+    memcpy(l, &L0, 16); memcpy(l + 4, &L1, 16); memcpy(l + 8, &L2, 16); memcpy(l + 12, &L3, 16);
+    memcpy(h, &H0, 16); memcpy(h + 4, &H1, 16); memcpy(h + 8, &H2, 16); memcpy(h + 12, &H3, 16);
+    *r0 = ailz_block_tail(l, a, e0, k, t);
+    *r1 = ailz_block_tail(h, a, e1, k, t);
+}
+#endif
 static float ailz_reduce(const unsigned char *a, const unsigned char *e, int64_t n, int prod, float *blocks) {
     int64_t nb = (n + 1023) / 1024;
     for (int64_t b = 0; b < nb; b++) {
@@ -215,13 +252,131 @@ static int64_t ailz_mm(ail_bytearray *O, ail_bytearray *A, ail_bytearray *B, int
     for (int64_t kk = 0; kk < k; kk++)
         for (int64_t jj = 0; jj < n; jj++) memcpy(bt + 4 * (jj * k + kk), B->p + 4 * (kk * n + jj), 4);
     float *blocks = ailz_blocks(k);
+#ifdef AILZ_VEC
+    /* job aicore1: two output columns at a time share the loads of row i (ailz_block2), and the columns are tiled so a tile
+       of bt stays in cache while every row of a passes over it. Each output element still runs exactly ailz_block's
+       operations in ailz_block's order (lane u % 16, the 8-4-2-1 tree, the block tree), so the bits do not change. */
+    float *blocks1 = ailz_blocks(k);
+    int64_t nb = (k + 1023) / 1024;
+    int64_t jt = 65536 / k;
+    if (jt < 2) jt = 2;
+    jt -= jt % 2;
+    for (int64_t jb = 0; jb < n; jb += jt) {
+        int64_t je = jb + jt < n ? jb + jt : n;
+        for (int64_t i = 0; i < m; i++) {
+            const unsigned char *arow = A->p + 4 * (i * k);
+            int64_t j = jb;
+            for (; j + 1 < je; j += 2) {
+                const unsigned char *e0 = bt + 4 * (j * k), *e1 = bt + 4 * ((j + 1) * k);
+                for (int64_t b = 0; b < nb; b++) {
+                    int64_t s = b * 1024, t = s + 1024 < k ? s + 1024 : k;
+                    ailz_block2(arow, e0, e1, s, t, blocks + b, blocks1 + b);
+                }
+                ailz_st(O->p, i * n + j, ailz_tree(blocks, 0, nb));
+                ailz_st(O->p, i * n + j + 1, ailz_tree(blocks1, 0, nb));
+            }
+            for (; j < je; j++) ailz_st(O->p, i * n + j, ailz_reduce(arow, bt + 4 * (j * k), k, 1, blocks));
+        }
+    }
+    free(blocks1);
+#else
     for (int64_t i = 0; i < m; i++)
         for (int64_t j = 0; j < n; j++) {
             float r = ailz_reduce(A->p + 4 * (i * k), bt + 4 * (j * k), k, 1, blocks);
             ailz_st(O->p, i * n + j, r);
         }
+#endif
     free(blocks);
     free(bt);
+    return 0;
+}
+/* ---- job aicore1: moves, math functions and row reductions of 2-D f32 arrays ---- */
+static void ailz_dims(int64_t r, int64_t c) {
+    if (r < 0 || c < 0 || (c && r > INT64_MAX / 4 / c)) ail_die("ail_array: f32 shape");
+}
+/* o (c x r) = the transpose of a (r x c): 4-byte moves only */
+static int64_t ailz_tr(ail_bytearray *O, ail_bytearray *A, int64_t r, int64_t c) {
+    ailz_dims(r, c);
+    ailz_chk(O, r * c); ailz_chk(A, r * c);
+    for (int64_t i = 0; i < r; i++)
+        for (int64_t j = 0; j < c; j++) memcpy(O->p + 4 * (j * r + i), A->p + 4 * (i * c + j), 4);
+    return 0;
+}
+/* o (r x c) = a (ar x ac) with a dimension of 1 repeated (broadcast): moves only */
+static int64_t ailz_bc(ail_bytearray *O, ail_bytearray *A, int64_t ar, int64_t ac, int64_t r, int64_t c) {
+    ailz_dims(r, c); ailz_dims(ar, ac);
+    if ((ar != r && ar != 1) || (ac != c && ac != 1)) ail_die("ail_array: broadcast shape");
+    ailz_chk(O, r * c); ailz_chk(A, ar * ac);
+    if (ar == 0 || ac == 0) return 0;
+    for (int64_t i = 0; i < r; i++) {
+        const unsigned char *src = A->p + 4 * ((ar == 1 ? 0 : i) * ac);
+        unsigned char *dst = O->p + 4 * (i * c);
+        if (ac == c) memcpy(dst, src, (size_t)(4 * c));
+        else for (int64_t j = 0; j < c; j++) memcpy(dst + 4 * j, src, 4);
+    }
+    return 0;
+}
+/* d = r_f32(f(a)) with f the binary64 libm function of the f64 path: which 1 exp, 2 log, 3 tanh (NaN canonical; exp
+   overflow gives inf, log of a negative NaN and of zero -inf, as _ail_taf_fn) */
+static int64_t ailz_fn(ail_bytearray *D, ail_bytearray *A, int64_t n, int64_t which) {
+    ailz_chk(D, n); ailz_chk(A, n);
+    for (int64_t k = 0; k < n; k++) {
+        double x = (double)ailz_ld(A->p, k), v;
+        if (x != x) v = NAN;
+        else if (which == 1) v = exp(x);
+        else if (which == 2) v = x < 0.0 ? NAN : x == 0.0 ? -INFINITY : log(x);
+        else v = tanh(x);
+        ailz_st(D->p, k, ailz_fix((float)v));
+    }
+    return 0;
+}
+/* o[i] = the f32 sum of row i of a (r x c) in the order of design 3.5 (ailz_reduce, as ta.sum of that row) */
+static int64_t ailz_rsum(ail_bytearray *O, ail_bytearray *A, int64_t r, int64_t c) {
+    ailz_dims(r, c);
+    ailz_chk(O, r); ailz_chk(A, r * c);
+    if (r == 0) return 0;
+    float *blocks = ailz_blocks(c);
+    for (int64_t i = 0; i < r; i++) {
+        float s = c == 0 ? 0.0f : ailz_reduce(A->p + 4 * (i * c), A->p + 4 * (i * c), c, 0, blocks);
+        ailz_st(O->p, i, s);
+    }
+    free(blocks);
+    return 0;
+}
+/* o[i] = the min (smaller 1) or max of row i: the first NaN makes it NaN; -0.0 is below 0.0; ties keep the first (c > 0) */
+static int ailz_less(float x, float y) {
+    if (x == y && x == 0.0f) return signbit(x) && !signbit(y);
+    return x < y;
+}
+static int64_t ailz_rext(ail_bytearray *O, ail_bytearray *A, int64_t r, int64_t c, int64_t smaller) {
+    ailz_dims(r, c);
+    ailz_chk(O, r); ailz_chk(A, r * c);
+    if (r > 0 && c == 0) ail_die("ail_array: empty row");
+    for (int64_t i = 0; i < r; i++) {
+        const unsigned char *row = A->p + 4 * (i * c);
+        float best = ailz_ld(row, 0);
+        for (int64_t k = 0; k < c; k++) {
+            float x = ailz_ld(row, k);
+            if (x != x) { best = x; break; }
+            if (k > 0 && (smaller ? ailz_less(x, best) : ailz_less(best, x))) best = x;
+        }
+        ailz_st(O->p, i, best);
+    }
+    return 0;
+}
+/* d = minimum (smaller 1) or maximum of a and b (bs 0: b an array; bs 1: the scalar x for every element), as
+   _ail_taf_pick_aa / _as: NaN in either gives NaN, -0.0 is below 0.0, b wins only when it is strictly on the chosen side */
+static int64_t ailz_pick(ail_bytearray *D, ail_bytearray *A, ail_bytearray *B, double xd, int64_t n, int64_t smaller,
+                         int64_t bs) {
+    ailz_chk(D, n); ailz_chk(A, n);
+    if (!bs) ailz_chk(B, n);
+    float x = (float)xd;
+    for (int64_t k = 0; k < n; k++) {
+        float p = ailz_ld(A->p, k), q = bs ? x : ailz_ld(B->p, k), v;
+        if (p != p || q != q) v = NAN;
+        else v = (ailz_less(q, p) == (smaller != 0)) ? q : p;
+        ailz_st(D->p, k, v);
+    }
     return 0;
 }
 /* the index of the first NaN pattern other than 7fc00000 (sign or payload), or -1 */

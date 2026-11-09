@@ -495,12 +495,55 @@ def _run(a, xs, step, name, into):
     return Array._of(dt, out, a._sh)
 
 
+def _bshape(a, o):
+    """The broadcast shape of two arrays of which one is 2-D (job aicore1): NumPy's rule restricted to 1-D and 2-D. A 1-D
+    array of n elements counts as (1, n); each dimension must be equal, or 1 on one side (that side is repeated). None
+    when the shapes do not broadcast. Two 1-D arrays never broadcast (they need the same length, as before)."""
+    ar, ac = a._sh if a._sh is not None else (1, a._n)
+    br, bc = o._sh if o._sh is not None else (1, o._n)
+    r = ar if (ar == br or br == 1) else br if ar == 1 else None
+    c = ac if (ac == bc or bc == 1) else bc if ac == 1 else None
+    if r is None or c is None:
+        return None
+    return r, c
+
+
+def _expand(a, sh):
+    """The values of `a` repeated to the broadcast shape `sh` (row-major); moves only, so every value is exact."""
+    ar, ac = a._sh if a._sh is not None else (1, a._n)
+    r, c = sh
+    xs = a._values()
+    return [xs[(0 if ar == 1 else i) * ac + (0 if ac == 1 else j)] for i in range(r) for j in range(c)]
+
+
+def _broadcast(a, o, sym, into):
+    """(xs, ys, shape) of an array-array operation where one side is 2-D and the shapes differ; the dtype check comes first,
+    as in `_operand`. An in-place operation keeps the shape of its left side."""
+    if o._dt is not a._dt:
+        raise TypeError('ail_array: %s %s %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)'
+                        % (a._dt, sym, o._dt, o._dt, a._dt))
+    sh = _bshape(a, o)
+    if sh is None or (into is not None and sh != a.shape):
+        raise ValueError('ail_array: shapes differ: %s and %s' % (a.shape, o.shape))
+    return _expand(a, sh), _expand(o, sh), sh
+
+
+def _two_d_pair(a, o):
+    return isinstance(o, Array) and (a._sh is not None or o._sh is not None) and a.shape != o.shape
+
+
 def _binary(a, o, sym, reflected, into=None):
     dt = a._dt
     if dt.is_float and sym in ('//', '%'):
         raise TypeError('ail_array: %s is not defined for %s arrays; write a loop over a.tolist()' % (sym, dt))
     if not dt.is_float and sym == '/':
         raise TypeError('ail_array: / on %s arrays; write a.astype(ta.f64) / b.astype(ta.f64)' % dt)
+    if _two_d_pair(a, o):
+        xs, ys, sh = _broadcast(a, o, sym, into)
+        op = (_FOPS if dt.is_float else _IOPS)[sym]
+        res = _run(a, xs, lambda k: op(xs[k], ys[k]), _OPNAME[sym], into)
+        res._sh = sh
+        return res
     ys = _operand(a, o, sym)
     if ys is NotImplemented:
         return NotImplemented
@@ -578,10 +621,14 @@ def _less(x, y):
 def _pick(a, b, name, smaller):
     if not isinstance(a, Array):
         raise TypeError('ail_array.%s() needs an ail_array.Array first, not %s' % (name, _type_name(a)))
-    ys = _operand(a, b, name)
-    if ys is NotImplemented:
-        raise TypeError('ail_array.%s(): unsupported operand %s' % (name, _type_name(b)))
-    xs = a._values()
+    sh = a._sh
+    if _two_d_pair(a, b):
+        xs, ys, sh = _broadcast(a, b, name, None)
+    else:
+        ys = _operand(a, b, name)
+        if ys is NotImplemented:
+            raise TypeError('ail_array.%s(): unsupported operand %s' % (name, _type_name(b)))
+        xs = a._values()
     out = []
     for x, y in zip(xs, ys):
         if x != x or y != y:
@@ -590,7 +637,7 @@ def _pick(a, b, name, smaller):
             out.append(y)
         else:
             out.append(x)
-    return Array._of(a._dt, out, a._sh)
+    return Array._of(a._dt, out, sh)
 
 
 def minimum(a, b):
@@ -737,8 +784,40 @@ def _one_d(a, name):
         raise ValueError('ail_array.%s(): 2-D arrays are not built here; reduce one row: ta.%s(M[i])' % (name, name))
 
 
-def sum(a, acc=None, order=None):
-    """The module's sum: exact Python int for int arrays; the fixed blocked order for floats (a Python float)."""
+def _rows(a, name, axis, keepdims):
+    """The 1-D slices a reduction with `axis=` reduces (job aicore1): the rows of a 2-D float array for axis 1 (or -1),
+    its columns for axis 0 (or -2). Each slice is reduced exactly as the 1-D function reduces a 1-D array, so
+    `ta.sum(M, axis=1)[i]` is `ta.sum(M[i])` bit for bit, and `ta.max(M, axis=0)[j]` is `ta.max` of column j."""
+    if not isinstance(a, Array):
+        raise TypeError('ail_array.%s() needs an ail_array.Array, not %s' % (name, _type_name(a)))
+    if isinstance(axis, bool) or not isinstance(axis, int) or axis not in (0, 1, -1, -2):
+        raise ValueError('ail_array.%s(): axis must be 0 or 1 (or -2, -1), not %r' % (name, axis))
+    if not isinstance(keepdims, bool):
+        raise TypeError('ail_array.%s(): keepdims must be True or False, not %s' % (name, _type_name(keepdims)))
+    if a._sh is None:
+        raise ValueError('ail_array.%s(): axis= needs a 2-D array; reduce a 1-D array with ta.%s(a)' % (name, name))
+    if not a._dt.is_float:
+        raise TypeError('ail_array.%s(axis=...) is built for float arrays, not %s' % (name, a._dt))
+    m = a if axis in (1, -1) else a.T
+    return [m[i] for i in range(len(m))], axis in (1, -1)
+
+
+def _reduced(dt, values, by_rows, keepdims):
+    """The result of an axis reduction: 1-D, or 2-D with the reduced dimension kept as 1."""
+    if not keepdims:
+        return Array._of(dt, values)
+    return Array._of(dt, values, (len(values), 1) if by_rows else (1, len(values)))
+
+
+def sum(a, acc=None, order=None, *, axis=None, keepdims=False):
+    """The module's sum: exact Python int for int arrays; the fixed blocked order for floats (a Python float).
+    With `axis=` (2-D float arrays): an array of the sums of the rows (axis 1) or columns (axis 0), each in the fixed
+    order; its dtype is the accumulator's (f32 for f16)."""
+    if axis is not None:
+        rows, by_rows = _rows(a, 'sum', axis, keepdims)
+        if acc is not None or order is not None:
+            raise ValueError('ail_array.sum(): acc= and order= are not built together with axis=')
+        return _reduced(_acc(a, None, 'sum'), [sum(r) for r in rows], by_rows, keepdims)
     if not isinstance(a, Array):
         raise TypeError('ail_array.sum() needs an ail_array.Array, not %s' % _type_name(a))
     _one_d(a, 'sum')
@@ -825,25 +904,43 @@ def _extreme(a, name, smaller):
     return best, xs[best]
 
 
-def min(a, order=None):
-    """Smallest element; NaN if any element is NaN; -0.0 is below 0.0."""
+def min(a, order=None, *, axis=None, keepdims=False):
+    """Smallest element; NaN if any element is NaN; -0.0 is below 0.0. With `axis=`: the min of each row or column."""
+    if axis is not None:
+        rows, by_rows = _rows(a, 'min', axis, keepdims)
+        if order is not None:
+            raise ValueError("ta.min has no inexact form; drop order='any'")
+        return _reduced(a._dt, [_extreme(r, 'min', True)[1] for r in rows], by_rows, keepdims)
     if order is not None:
         raise ValueError("ta.min has no inexact form; drop order='any'")
     return _extreme(a, 'min', True)[1]
 
 
-def max(a, order=None):
-    """Largest element; NaN if any element is NaN; 0.0 is above -0.0."""
+def max(a, order=None, *, axis=None, keepdims=False):
+    """Largest element; NaN if any element is NaN; 0.0 is above -0.0. With `axis=`: the max of each row or column."""
+    if axis is not None:
+        rows, by_rows = _rows(a, 'max', axis, keepdims)
+        if order is not None:
+            raise ValueError("ta.max has no inexact form; drop order='any'")
+        return _reduced(a._dt, [_extreme(r, 'max', False)[1] for r in rows], by_rows, keepdims)
     if order is not None:
         raise ValueError("ta.max has no inexact form; drop order='any'")
     return _extreme(a, 'max', False)[1]
 
 
-def argmin(a):
-    """Lowest index of the smallest element (the first NaN if there is one)."""
+def argmin(a, *, axis=None):
+    """Lowest index of the smallest element (the first NaN if there is one). With `axis=`: an int32 array of the index
+    in each row or column."""
+    if axis is not None:
+        rows, _ = _rows(a, 'argmin', axis, False)
+        return Array._of(int32, [_extreme(r, 'argmin', True)[0] for r in rows])
     return _extreme(a, 'argmin', True)[0]
 
 
-def argmax(a):
-    """Lowest index of the largest element (the first NaN if there is one)."""
+def argmax(a, *, axis=None):
+    """Lowest index of the largest element (the first NaN if there is one). With `axis=`: an int32 array of the index
+    in each row or column."""
+    if axis is not None:
+        rows, _ = _rows(a, 'argmax', axis, False)
+        return Array._of(int32, [_extreme(r, 'argmax', False)[0] for r in rows])
     return _extreme(a, 'argmax', False)[0]
