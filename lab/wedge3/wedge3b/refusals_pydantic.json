@@ -1,0 +1,138 @@
+{
+ "profile_functions": 77,
+ "total_self_s": 5.3168,
+ "native_self_s": 0.0,
+ "native_functions": 0,
+ "rows": [
+  {
+   "category": "method (class with decorators/bases/metaclass)",
+   "self_s": 3.8895,
+   "share": 73.16,
+   "functions": 25,
+   "modules": [
+    "fields.py",
+    "main.py",
+    "utils.py"
+   ],
+   "examples": [
+    "fields.py.FieldInfo.__init__",
+    "fields.py.FieldInfo._validate",
+    "fields.py.FieldInfo.get_constraints",
+    "fields.py.ModelField.__init__",
+    "fields.py.ModelField._apply_validators",
+    "fields.py.ModelField._create_sub_type"
+   ],
+   "reasons": {
+    "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython": 25
+   }
+  },
+  {
+   "category": "not-a-typed-candidate",
+   "self_s": 1.111,
+   "share": 20.9,
+   "functions": 21,
+   "modules": [
+    "class_validators.py",
+    "fields.py",
+    "main.py",
+    "utils.py",
+    "validators.py"
+   ],
+   "examples": [
+    "class_validators.py._generic_validator_basic",
+    "class_validators.py.extract_root_validators",
+    "class_validators.py.extract_validators",
+    "class_validators.py.inherit_validators",
+    "class_validators.py.make_generic_validator",
+    "class_validators.py.prep_validators"
+   ],
+   "reasons": {
+    "not a typed candidate, stays in CPython": 21
+   }
+  },
+  {
+   "category": "nested function (not a unit)",
+   "self_s": 0.3153,
+   "share": 5.93,
+   "functions": 5,
+   "modules": [
+    "class_validators.py",
+    "fields.py",
+    "main.py",
+    "validators.py"
+   ],
+   "examples": [
+    "class_validators.py.ValidatorGroup.check_for_unused.<locals>.<genexpr>",
+    "class_validators.py._generic_validator_basic.<locals>.<lambda>",
+    "fields.py.ModelField.populate_validators.<locals>.<genexpr>",
+    "main.py.ModelMetaclass.__new__.<locals>.is_untouched",
+    "validators.py.IfConfig.check.<locals>.<genexpr>"
+   ],
+   "reasons": {
+    "(none)": 5
+   }
+  },
+  {
+   "category": "method (decorated/dunder/non-plain signature)",
+   "self_s": 0.001,
+   "share": 0.02,
+   "functions": 3,
+   "modules": [
+    "class_validators.py",
+    "fields.py",
+    "validators.py"
+   ],
+   "examples": [
+    "class_validators.py.ValidatorGroup.__init__",
+    "fields.py.UndefinedType.__deepcopy__",
+    "validators.py.IfConfig.__init__"
+   ],
+   "reasons": {
+    "a decorated, dunder or non-plain-signature method stays in CPython": 3
+   }
+  },
+  {
+   "category": "not recorded (silent refusal)",
+   "self_s": 0.0,
+   "share": 0.0,
+   "functions": 20,
+   "modules": [
+    "class_validators.py",
+    "fields.py",
+    "main.py",
+    "utils.py",
+    "validators.py"
+   ],
+   "examples": [
+    "class_validators.py.<module>",
+    "class_validators.py.Validator",
+    "class_validators.py.ValidatorGroup",
+    "fields.py.<module>",
+    "fields.py.DeferredType",
+    "fields.py.FieldInfo"
+   ],
+   "reasons": {
+    "(none)": 20
+   }
+  },
+  {
+   "category": "method (field kind not expressible)",
+   "self_s": 0.0,
+   "share": 0.0,
+   "functions": 3,
+   "modules": [
+    "class_validators.py",
+    "validators.py"
+   ],
+   "examples": [
+    "class_validators.py.ValidatorGroup.check_for_unused",
+    "class_validators.py.ValidatorGroup.get_validators",
+    "validators.py.IfConfig.check"
+   ],
+   "reasons": {
+    "method: field self.used_validators has no scalar or int/float list kind, stays in CPython": 2,
+    "method: field self.config_attr_names has no scalar or int/float list kind, stays in CPython": 1
+   }
+  }
+ ]
+}
