@@ -1,3 +1,14 @@
+## 2026-11-09 -- wedge3 suite fix: allow the SQL workload data file (job-wedge3-11091646)
+
+`test_ail_wedge3` failed on the current integration candidate (`1fe0b64`): the
+wedge3b job adds `lab/wedge3/wedge3b/workloads/queries.sql`, and the test's
+no-vendored-source check allowed only `.py`, `.txt`, `.json`, `.md` and `.sh`.
+That check exists to catch vendored library source, so SQL workload data is
+legitimate; the suffix allowlist now includes `.sql`. No compiler or runtime
+behaviour changed. Reproduced the failure on `origin/cand-1109154137` and the
+fix passes there and on `origin/cand-1109165043` with the wedge3 artefact
+overlaid; `test_ail_wedge3` also still passes on this tree.
+
 ## 2026-11-09 -- wedge3: the CPython hybrid on real libraries with Rust rewrites (job-wedge3-11091201)
 
 Measurement only; no compiler or runtime file changed. Built the hybrid from the `job-obs5-op1109`

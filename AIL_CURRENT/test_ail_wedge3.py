@@ -60,7 +60,7 @@ class Wedge3Test(unittest.TestCase):
             if path.is_dir():
                 self.assertNotIn(path.name, banned, path)
             elif path.is_file():
-                self.assertIn(path.suffix, {'.py', '.txt', '.json', '.md', '.sh'}, path)
+                self.assertIn(path.suffix, {'.py', '.txt', '.json', '.md', '.sh', '.sql'}, path)
 
     def test_scripts_compile(self):
         for path in [LAB / 'measure.py', *sorted((LAB / 'workloads').glob('*.py'))]:
