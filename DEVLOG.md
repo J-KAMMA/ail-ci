@@ -9,9 +9,11 @@ throw-away venvs and never vendored.
 Five pairs (networkx/rustworkx, jsonschema/jsonschema-rs, chardet/charset-normalizer, tomli/rtoml,
 difflib/rapidfuzz) were measured on deterministic 1.5-4.4 s workloads, medians of 5. The hybrid
 made **0 of 191** hot-module functions native and ran at a geometric-mean **1.045x CPython**
-(0.967-1.075x). PyPy ran the pure libraries at 1.0-2.6x the hybrid's time, and the rewrites were a
-geometric-mean **2.31x CPython** (jsonschema-rs 7.9x, rtoml 3.5x, rapidfuzz 3.4x, rustworkx 2.7x;
-charset-normalizer was 3.3x *slower* on these payloads and is reported as measured). Every hybrid
+(0.967-1.075x). PyPy ran the pure libraries at 0.39-1.0x the hybrid's time (the hybrid took
+1.0-2.6x PyPy's time), and the rewrites were a geometric-mean **2.31x faster than CPython**
+(rewrite/CPython: jsonschema-rs 7.58x faster, rtoml 3.26x faster, rapidfuzz 3.15x faster,
+rustworkx 2.78x faster; charset-normalizer was 3.28x *slower* on these payloads and is reported as
+measured). Every hybrid
 output matched CPython byte for byte, plain and observed, on all five workloads.
 
 The observed-type recorder (`--all --fast`) plus `ail_observe annotate` changed the source of

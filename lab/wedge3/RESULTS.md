@@ -18,9 +18,10 @@ hybrid entry point is `python3 AIL_CURRENT/ail_chatgpt.py build --cpython SOURCE
 
 On five real library pairs the hybrid made **0 of 191** hot-module functions native and ran at a
 **geometric-mean 1.045x CPython** (range 0.967x-1.075x), while the same workloads run on the
-rewritten libraries are a geometric-mean **2.31x faster** (0.33x-7.9x per pair); "compile it"
-today is a ~1.0x no-op against a rewrite's ~2-8x, and the gap is not annotations -- observed
-kinds changed the native count by exactly zero.
+rewritten libraries are a geometric-mean **2.31x faster** (rewrite/CPython 0.132x-3.277x per
+pair, i.e. 7.58x faster to 3.28x slower); "compile it" today is a ~1.0x no-op against a
+rewrite's ~2.3x, and the gap is not annotations -- observed kinds changed the native count by
+exactly zero.
 
 ## 1. The pairs and the workloads
 
