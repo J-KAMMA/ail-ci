@@ -1,3 +1,13 @@
+## 2026-11-09 -- suite fix: restore the DIFFERENCES table delimiter (job-rbwedge4-11091237)
+
+`test_ail_docs_site` failed because the root `DIFFERENCES.md` table had lost its delimiter
+row: `docs_site` therefore treated the whole table as one paragraph and flagged a
+reference-style link (`DIFFERENCES.md:3`), which is really the `][` inside an inline code
+span in a later row.  The `| --- | --- | --- | --- |` row is back, so the table renders as a
+table again.  `python3 tools/docs_site.py docs` exits 0 (45 pages from 44 Markdown files,
+255 fenced code blocks) and `python3 tools/docs_links.py docs` reports 0 broken links.
+No compiler or runtime code changed.
+
 ## 2026-11-08 -- wedge4 review fix 2: container searches keep lifted float methods in CPython (job-rbwedge4-11090123)
 
 The C117 guard added last commit only fired when `unified.nan_capable` could see a NaN token.
