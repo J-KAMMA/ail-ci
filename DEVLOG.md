@@ -126,6 +126,35 @@ cases; the method test also calls the native kernel directly, so an extension th
 fail), `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 4 modules, 0 failed, 410 s.
 `test_ail_examples_hybrid` passes on the final code.  `python3 tools/update_manifest.py` regenerated the
 `test_ail_cpython_hybrid.py` pin and `--check` is clean.  No default (non-hybrid) build path changed.
+## 2026-11-09 -- wedge3: the CPython hybrid on real libraries with Rust rewrites (job-wedge3-11091201)
+
+Measurement only; no compiler or runtime file changed. Built the hybrid from the `job-obs5-op1109`
+worktree (commit `69e2dcd0a82580fa06e26b275352fbedfb7d31e1`), not from this branch, because the
+observed-type work obs1-obs5 is not integrated here. `lab/wedge3/` holds the scripts, pinned
+`requirements.txt`, raw `results.json` and `RESULTS.md`; the five libraries are pip-installed into
+throw-away venvs and never vendored.
+
+Five pairs (networkx/rustworkx, jsonschema/jsonschema-rs, chardet/charset-normalizer, tomli/rtoml,
+difflib/rapidfuzz) were measured on deterministic 1.5-4.4 s workloads, medians of 5. The hybrid
+made **0 of 191** hot-module functions native and ran at a geometric-mean **1.045x CPython**
+(0.967-1.075x). PyPy ran the pure libraries at 0.39-1.0x the hybrid's time (the hybrid took
+1.0-2.6x PyPy's time), and the rewrites were a geometric-mean **2.31x faster than CPython**
+(rewrite/CPython: jsonschema-rs 7.58x faster, rtoml 3.26x faster, rapidfuzz 3.15x faster,
+rustworkx 2.78x faster; charset-normalizer was 3.28x *slower* on these payloads and is reported as
+measured). Every hybrid
+output matched CPython byte for byte, plain and observed, on all five workloads.
+
+The observed-type recorder (`--all --fast`) plus `ail_observe annotate` changed the source of
+networkx, jsonschema and difflib, but the native count stayed 0; the blockers are structural.
+Refusals ranked by recorder self time: `pymix` not-a-typed-candidate 42.6%, nested
+function/lambda/comprehension 36.7% (networkx's weight lambda alone 2.6 s, jsonschema's
+attrs-generated `Validator` methods 0.80 s), method class shape 19.7%, dunder/decorated 0.9%,
+calls-a-refused-method 0.1%; 2.14 s more is in library modules outside the built hot set (chardet
+probers 1.54 s). `RESULTS.md` carries the five 2-hour tasks. Probes `/tmp/probes/wedge3_{int,list,str}.py`
+match CPython on both builds with `bash ~/tools/cmp.sh`; hybrid builds of them accelerate 2 functions
+each and match byte for byte. Added `test_ail_wedge3.py` (registered in `tests.d/`), which pins the
+artefact shape, the zero-native result, the compiler commit and the no-vendoring rule. Tests on the
+final commit: `test_ail_wedge3`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
 
 ## 2026-11-08 -- aiknow1: agent-facing AIL material (job-aiknow1-11081958)
 

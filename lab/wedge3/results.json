@@ -1,0 +1,731 @@
+{
+ "ail": "/home/runner/work/ail-ci/obs5/AIL_CURRENT",
+ "python": "Python 3.12.3",
+ "pypy": "[PyPy 8.0.1 with GCC 14.2.1 20250110 (Red Hat 14.2.1-11)]",
+ "pairs": {
+  "networkx": {
+   "workload": "networkx_bench.py",
+   "rust_impl": "rustworkx",
+   "modules": {
+    "networkx.algorithms.shortest_paths.weighted": "/tmp/wedge3venv/lib/python3.12/site-packages/networkx/algorithms/shortest_paths/weighted.py",
+    "networkx.algorithms.shortest_paths.unweighted": "/tmp/wedge3venv/lib/python3.12/site-packages/networkx/algorithms/shortest_paths/unweighted.py"
+   },
+   "recorder_s": 5.64575937099994,
+   "builds": {
+    "plain": {
+     "weighted": {
+      "accelerated": [],
+      "rejected": {
+       "_bellman_ford": "not a typed candidate, stays in CPython",
+       "_dijkstra": "not a typed candidate, stays in CPython",
+       "_dijkstra_multisource": "not a typed candidate, stays in CPython",
+       "_inner_bellman_ford": "not a typed candidate, stays in CPython",
+       "_weight_function": "not a typed candidate, stays in CPython",
+       "all_pairs_bellman_ford_path": "not a typed candidate, stays in CPython",
+       "all_pairs_bellman_ford_path_length": "not a typed candidate, stays in CPython",
+       "all_pairs_dijkstra": "not a typed candidate, stays in CPython",
+       "all_pairs_dijkstra_path": "not a typed candidate, stays in CPython",
+       "all_pairs_dijkstra_path_length": "not a typed candidate, stays in CPython",
+       "bellman_ford_path": "not a typed candidate, stays in CPython",
+       "bellman_ford_path_length": "not a typed candidate, stays in CPython",
+       "bellman_ford_predecessor_and_distance": "not a typed candidate, stays in CPython",
+       "bidirectional_dijkstra": "not a typed candidate, stays in CPython",
+       "dijkstra_path": "not a typed candidate, stays in CPython",
+       "dijkstra_path_length": "not a typed candidate, stays in CPython",
+       "dijkstra_predecessor_and_distance": "not a typed candidate, stays in CPython",
+       "find_negative_cycle": "not a typed candidate, stays in CPython",
+       "goldberg_radzik": "not a typed candidate, stays in CPython",
+       "johnson": "not a typed candidate, stays in CPython",
+       "multi_source_dijkstra": "not a typed candidate, stays in CPython",
+       "multi_source_dijkstra_path": "not a typed candidate, stays in CPython",
+       "multi_source_dijkstra_path_length": "not a typed candidate, stays in CPython",
+       "negative_edge_cycle": "not a typed candidate, stays in CPython",
+       "single_source_bellman_ford": "not a typed candidate, stays in CPython",
+       "single_source_bellman_ford_path": "not a typed candidate, stays in CPython",
+       "single_source_bellman_ford_path_length": "not a typed candidate, stays in CPython",
+       "single_source_dijkstra": "not a typed candidate, stays in CPython",
+       "single_source_dijkstra_path": "not a typed candidate, stays in CPython",
+       "single_source_dijkstra_path_length": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     },
+     "unweighted": {
+      "accelerated": [],
+      "rejected": {
+       "_bidirectional_pred_succ": "not a typed candidate, stays in CPython",
+       "_single_shortest_path": "not a typed candidate, stays in CPython",
+       "_single_shortest_path_length": "not a typed candidate, stays in CPython",
+       "all_pairs_shortest_path": "not a typed candidate, stays in CPython",
+       "all_pairs_shortest_path_length": "not a typed candidate, stays in CPython",
+       "bidirectional_shortest_path": "not a typed candidate, stays in CPython",
+       "predecessor": "not a typed candidate, stays in CPython",
+       "single_source_shortest_path": "not a typed candidate, stays in CPython",
+       "single_source_shortest_path_length": "not a typed candidate, stays in CPython",
+       "single_target_shortest_path": "not a typed candidate, stays in CPython",
+       "single_target_shortest_path_length": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     }
+    },
+    "obs": {
+     "weighted": {
+      "accelerated": [],
+      "rejected": {
+       "_bellman_ford": "not a typed candidate, stays in CPython",
+       "_dijkstra": "not a typed candidate, stays in CPython",
+       "_dijkstra_multisource": "not a typed candidate, stays in CPython",
+       "_inner_bellman_ford": "not a typed candidate, stays in CPython",
+       "_weight_function": "not a typed candidate, stays in CPython",
+       "all_pairs_bellman_ford_path": "not a typed candidate, stays in CPython",
+       "all_pairs_bellman_ford_path_length": "not a typed candidate, stays in CPython",
+       "all_pairs_dijkstra": "not a typed candidate, stays in CPython",
+       "all_pairs_dijkstra_path": "not a typed candidate, stays in CPython",
+       "all_pairs_dijkstra_path_length": "not a typed candidate, stays in CPython",
+       "bellman_ford_path": "not a typed candidate, stays in CPython",
+       "bellman_ford_path_length": "not a typed candidate, stays in CPython",
+       "bellman_ford_predecessor_and_distance": "not a typed candidate, stays in CPython",
+       "bidirectional_dijkstra": "not a typed candidate, stays in CPython",
+       "dijkstra_path": "not a typed candidate, stays in CPython",
+       "dijkstra_path_length": "not a typed candidate, stays in CPython",
+       "dijkstra_predecessor_and_distance": "not a typed candidate, stays in CPython",
+       "find_negative_cycle": "not a typed candidate, stays in CPython",
+       "goldberg_radzik": "not a typed candidate, stays in CPython",
+       "johnson": "not a typed candidate, stays in CPython",
+       "multi_source_dijkstra": "not a typed candidate, stays in CPython",
+       "multi_source_dijkstra_path": "not a typed candidate, stays in CPython",
+       "multi_source_dijkstra_path_length": "not a typed candidate, stays in CPython",
+       "negative_edge_cycle": "not a typed candidate, stays in CPython",
+       "single_source_bellman_ford": "not a typed candidate, stays in CPython",
+       "single_source_bellman_ford_path": "not a typed candidate, stays in CPython",
+       "single_source_bellman_ford_path_length": "not a typed candidate, stays in CPython",
+       "single_source_dijkstra": "not a typed candidate, stays in CPython",
+       "single_source_dijkstra_path": "not a typed candidate, stays in CPython",
+       "single_source_dijkstra_path_length": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     },
+     "unweighted": {
+      "accelerated": [],
+      "rejected": {
+       "_bidirectional_pred_succ": "not a typed candidate, stays in CPython",
+       "_single_shortest_path": "not a typed candidate, stays in CPython",
+       "_single_shortest_path_length": "not a typed candidate, stays in CPython",
+       "all_pairs_shortest_path": "not a typed candidate, stays in CPython",
+       "all_pairs_shortest_path_length": "not a typed candidate, stays in CPython",
+       "bidirectional_shortest_path": "not a typed candidate, stays in CPython",
+       "predecessor": "not a typed candidate, stays in CPython",
+       "single_source_shortest_path": "not a typed candidate, stays in CPython",
+       "single_source_shortest_path_length": "not a typed candidate, stays in CPython",
+       "single_target_shortest_path": "not a typed candidate, stays in CPython",
+       "single_target_shortest_path_length": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     }
+    }
+   },
+   "times": {
+    "cpython": 4.028965613000082,
+    "pypy": 3.2228317960000368,
+    "hybrid": 3.8974876539998604,
+    "hybrid_obs": 4.51866129400014,
+    "rust": 1.4489858580000146
+   },
+   "stdout_match": {
+    "hybrid": true,
+    "hybrid_obs": true,
+    "pypy": true,
+    "rust": true
+   },
+   "stdout": {
+    "cpython": "weighted 1063842 120000\nunweighted 1032160 120000\n",
+    "pypy": "weighted 1063842 120000\nunweighted 1032160 120000\n",
+    "hybrid": "weighted 1063842 120000\nunweighted 1032160 120000\n",
+    "hybrid_obs": "weighted 1063842 120000\nunweighted 1032160 120000\n",
+    "rust": "weighted 1063842 120000\nunweighted 1032160 120000\n"
+   },
+   "errors": {},
+   "profile": "/tmp/wedge3-xbu6q8bk/obs_networkx.json"
+  },
+  "jsonschema": {
+   "workload": "jsonschema_bench.py",
+   "rust_impl": "jsonschema-rs",
+   "modules": {
+    "jsonschema._keywords": "/tmp/wedge3venv/lib/python3.12/site-packages/jsonschema/_keywords.py",
+    "jsonschema.validators": "/tmp/wedge3venv/lib/python3.12/site-packages/jsonschema/validators.py"
+   },
+   "recorder_s": 2.530675292000069,
+   "builds": {
+    "plain": {
+     "_keywords": {
+      "accelerated": [],
+      "rejected": {
+       "additionalProperties": "not a typed candidate, stays in CPython",
+       "allOf": "not a typed candidate, stays in CPython",
+       "anyOf": "not a typed candidate, stays in CPython",
+       "const": "not a typed candidate, stays in CPython",
+       "contains": "not a typed candidate, stays in CPython",
+       "dependentRequired": "not a typed candidate, stays in CPython",
+       "dependentSchemas": "not a typed candidate, stays in CPython",
+       "dynamicRef": "not a typed candidate, stays in CPython",
+       "enum": "not a typed candidate, stays in CPython",
+       "exclusiveMaximum": "not a typed candidate, stays in CPython",
+       "exclusiveMinimum": "not a typed candidate, stays in CPython",
+       "format": "not a typed candidate, stays in CPython",
+       "if_": "not a typed candidate, stays in CPython",
+       "items": "not a typed candidate, stays in CPython",
+       "maxItems": "not a typed candidate, stays in CPython",
+       "maxLength": "not a typed candidate, stays in CPython",
+       "maxProperties": "not a typed candidate, stays in CPython",
+       "maximum": "not a typed candidate, stays in CPython",
+       "minItems": "not a typed candidate, stays in CPython",
+       "minLength": "not a typed candidate, stays in CPython",
+       "minProperties": "not a typed candidate, stays in CPython",
+       "minimum": "not a typed candidate, stays in CPython",
+       "multipleOf": "not a typed candidate, stays in CPython",
+       "not_": "not a typed candidate, stays in CPython",
+       "oneOf": "not a typed candidate, stays in CPython",
+       "pattern": "not a typed candidate, stays in CPython",
+       "patternProperties": "not a typed candidate, stays in CPython",
+       "prefixItems": "not a typed candidate, stays in CPython",
+       "properties": "not a typed candidate, stays in CPython",
+       "propertyNames": "not a typed candidate, stays in CPython",
+       "ref": "not a typed candidate, stays in CPython",
+       "required": "not a typed candidate, stays in CPython",
+       "type": "not a typed candidate, stays in CPython",
+       "unevaluatedItems": "not a typed candidate, stays in CPython",
+       "unevaluatedProperties": "not a typed candidate, stays in CPython",
+       "uniqueItems": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     },
+     "validators": {
+      "accelerated": [],
+      "rejected": {
+       "_RefResolver.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver._find_in_referrer": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver._find_in_subschemas": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver._get_subschemas_cache": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.base_uri": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.from_schema": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.in_scope": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.pop_scope": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.push_scope": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.resolution_scope": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.resolve": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.resolve_fragment": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.resolve_from_url": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.resolve_remote": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.resolving": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "__getattr__": "not a typed candidate, stays in CPython",
+       "_match_keyword": "not a typed candidate, stays in CPython",
+       "_match_subschema_keywords": "not a typed candidate, stays in CPython",
+       "_search_schema": "not a typed candidate, stays in CPython",
+       "_warn_for_remote_retrieve": "not a typed candidate, stays in CPython",
+       "create": "not a typed candidate, stays in CPython",
+       "extend": "not a typed candidate, stays in CPython",
+       "validate": "not a typed candidate, stays in CPython",
+       "validates": "not a typed candidate, stays in CPython",
+       "validator_for": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     }
+    },
+    "obs": {
+     "_keywords": {
+      "accelerated": [],
+      "rejected": {
+       "additionalProperties": "not a typed candidate, stays in CPython",
+       "allOf": "not a typed candidate, stays in CPython",
+       "anyOf": "not a typed candidate, stays in CPython",
+       "const": "not a typed candidate, stays in CPython",
+       "contains": "not a typed candidate, stays in CPython",
+       "dependentRequired": "not a typed candidate, stays in CPython",
+       "dependentSchemas": "not a typed candidate, stays in CPython",
+       "dynamicRef": "not a typed candidate, stays in CPython",
+       "enum": "not a typed candidate, stays in CPython",
+       "exclusiveMaximum": "not a typed candidate, stays in CPython",
+       "exclusiveMinimum": "not a typed candidate, stays in CPython",
+       "format": "not a typed candidate, stays in CPython",
+       "if_": "not a typed candidate, stays in CPython",
+       "items": "not a typed candidate, stays in CPython",
+       "maxItems": "not a typed candidate, stays in CPython",
+       "maxLength": "not a typed candidate, stays in CPython",
+       "maxProperties": "not a typed candidate, stays in CPython",
+       "maximum": "not a typed candidate, stays in CPython",
+       "minItems": "not a typed candidate, stays in CPython",
+       "minLength": "not a typed candidate, stays in CPython",
+       "minProperties": "not a typed candidate, stays in CPython",
+       "minimum": "not a typed candidate, stays in CPython",
+       "multipleOf": "not a typed candidate, stays in CPython",
+       "not_": "not a typed candidate, stays in CPython",
+       "oneOf": "not a typed candidate, stays in CPython",
+       "pattern": "not a typed candidate, stays in CPython",
+       "patternProperties": "not a typed candidate, stays in CPython",
+       "prefixItems": "not a typed candidate, stays in CPython",
+       "properties": "not a typed candidate, stays in CPython",
+       "propertyNames": "not a typed candidate, stays in CPython",
+       "ref": "not a typed candidate, stays in CPython",
+       "required": "not a typed candidate, stays in CPython",
+       "type": "not a typed candidate, stays in CPython",
+       "unevaluatedItems": "not a typed candidate, stays in CPython",
+       "unevaluatedProperties": "not a typed candidate, stays in CPython",
+       "uniqueItems": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     },
+     "validators": {
+      "accelerated": [],
+      "rejected": {
+       "_RefResolver.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver._find_in_referrer": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver._find_in_subschemas": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver._get_subschemas_cache": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.base_uri": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.from_schema": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.in_scope": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.pop_scope": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.push_scope": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.resolution_scope": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.resolve": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.resolve_fragment": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.resolve_from_url": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.resolve_remote": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_RefResolver.resolving": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "__getattr__": "not a typed candidate, stays in CPython",
+       "_match_keyword": "not a typed candidate, stays in CPython",
+       "_match_subschema_keywords": "not a typed candidate, stays in CPython",
+       "_search_schema": "not a typed candidate, stays in CPython",
+       "_warn_for_remote_retrieve": "not a typed candidate, stays in CPython",
+       "create": "not a typed candidate, stays in CPython",
+       "extend": "not a typed candidate, stays in CPython",
+       "validate": "not a typed candidate, stays in CPython",
+       "validates": "not a typed candidate, stays in CPython",
+       "validator_for": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     }
+    }
+   },
+   "times": {
+    "cpython": 1.998816806999912,
+    "pypy": 2.1046624240000256,
+    "hybrid": 2.094314107000173,
+    "hybrid_obs": 2.0857885739999347,
+    "rust": 0.2637499249999564
+   },
+   "stdout_match": {
+    "hybrid": true,
+    "hybrid_obs": true,
+    "pypy": true,
+    "rust": true
+   },
+   "stdout": {
+    "cpython": "valid 10799 total 40000 hash 7658731121082915723\n",
+    "pypy": "valid 10799 total 40000 hash 7658731121082915723\n",
+    "hybrid": "valid 10799 total 40000 hash 7658731121082915723\n",
+    "hybrid_obs": "valid 10799 total 40000 hash 7658731121082915723\n",
+    "rust": "valid 10799 total 40000 hash 7658731121082915723\n"
+   },
+   "errors": {},
+   "profile": "/tmp/wedge3-f_6rd9dd/obs_jsonschema.json"
+  },
+  "chardet": {
+   "workload": "chardet_bench.py",
+   "rust_impl": "charset-normalizer",
+   "modules": {
+    "chardet.universaldetector": "/tmp/wedge3venv/lib/python3.12/site-packages/chardet/universaldetector.py"
+   },
+   "recorder_s": 1.779190478999908,
+   "builds": {
+    "plain": {
+     "universaldetector": {
+      "accelerated": [],
+      "rejected": {
+       "UniversalDetector.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "UniversalDetector.charset_probers": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "UniversalDetector.close": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "UniversalDetector.feed": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "UniversalDetector.has_win_bytes": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "UniversalDetector.input_state": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "UniversalDetector.reset": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython"
+      },
+      "extension": null
+     }
+    },
+    "obs": {
+     "universaldetector": {
+      "accelerated": [],
+      "rejected": {
+       "UniversalDetector.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "UniversalDetector.charset_probers": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "UniversalDetector.close": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "UniversalDetector.feed": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "UniversalDetector.has_win_bytes": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "UniversalDetector.input_state": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "UniversalDetector.reset": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython"
+      },
+      "extension": null
+     }
+    }
+   },
+   "times": {
+    "cpython": 1.503043671000114,
+    "pypy": 1.0620631780000167,
+    "hybrid": 1.6151459800000794,
+    "hybrid_obs": 1.6082307130000117,
+    "rust": 4.925494552999908
+   },
+   "stdout_match": {
+    "hybrid": true,
+    "hybrid_obs": true,
+    "pypy": true,
+    "rust": false
+   },
+   "stdout": {
+    "cpython": "digest e6b2248f52b9647a samples 600\n",
+    "pypy": "digest e6b2248f52b9647a samples 600\n",
+    "hybrid": "digest e6b2248f52b9647a samples 600\n",
+    "hybrid_obs": "digest e6b2248f52b9647a samples 600\n",
+    "rust": "digest 6f7b0fdbc2492ebf samples 600\n"
+   },
+   "errors": {},
+   "profile": "/tmp/wedge3-f_6rd9dd/obs_chardet.json"
+  },
+  "tomli": {
+   "workload": "tomli_bench.py",
+   "rust_impl": "rtoml",
+   "modules": {
+    "tomli._re": "/tmp/wedge3venv/lib/python3.12/site-packages/tomli/_re.py",
+    "tomli._parser": "/tmp/wedge3venv/lib/python3.12/site-packages/tomli/_parser.py"
+   },
+   "recorder_s": 2.0738768619999064,
+   "builds": {
+    "plain": {
+     "_re": {
+      "accelerated": [],
+      "rejected": {
+       "cached_tz": "not a typed candidate, stays in CPython",
+       "match_to_datetime": "not a typed candidate, stays in CPython",
+       "match_to_localtime": "not a typed candidate, stays in CPython",
+       "match_to_number": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     },
+     "_parser": {
+      "accelerated": [],
+      "rejected": {
+       "Flags.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "Flags.add_pending": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "Flags.finalize_pending": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "Flags.is_": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "Flags.set": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "Flags.unset_all": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "NestedDict.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+       "NestedDict.append_nest_to_list": "method: calls a method that stays in CPython, stays in CPython",
+       "NestedDict.get_or_create_nest": "a decorated, dunder or non-plain-signature method stays in CPython",
+       "create_dict_rule": "not a typed candidate, stays in CPython",
+       "create_list_rule": "not a typed candidate, stays in CPython",
+       "is_unicode_scalar_value": "not a typed candidate, stays in CPython",
+       "key_value_rule": "not a typed candidate, stays in CPython",
+       "load": "not a typed candidate, stays in CPython",
+       "loads": "not a typed candidate, stays in CPython",
+       "make_safe_parse_float": "not a typed candidate, stays in CPython",
+       "parse_array": "not a typed candidate, stays in CPython",
+       "parse_basic_str": "not a typed candidate, stays in CPython",
+       "parse_basic_str_escape": "not a typed candidate, stays in CPython",
+       "parse_basic_str_escape_multiline": "not a typed candidate, stays in CPython",
+       "parse_hex_char": "not a typed candidate, stays in CPython",
+       "parse_inline_table": "not a typed candidate, stays in CPython",
+       "parse_key": "not a typed candidate, stays in CPython",
+       "parse_key_part": "not a typed candidate, stays in CPython",
+       "parse_key_value_pair": "not a typed candidate, stays in CPython",
+       "parse_literal_str": "not a typed candidate, stays in CPython",
+       "parse_multiline_str": "not a typed candidate, stays in CPython",
+       "parse_one_line_basic_str": "not a typed candidate, stays in CPython",
+       "parse_value": "not a typed candidate, stays in CPython",
+       "skip_chars": "not a typed candidate, stays in CPython",
+       "skip_comment": "not a typed candidate, stays in CPython",
+       "skip_comments_and_array_ws": "not a typed candidate, stays in CPython",
+       "skip_until": "not a typed candidate, stays in CPython",
+       "suffixed_err": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     }
+    },
+    "obs": {
+     "_re": {
+      "accelerated": [],
+      "rejected": {
+       "cached_tz": "not a typed candidate, stays in CPython",
+       "match_to_datetime": "not a typed candidate, stays in CPython",
+       "match_to_localtime": "not a typed candidate, stays in CPython",
+       "match_to_number": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     },
+     "_parser": {
+      "accelerated": [],
+      "rejected": {
+       "Flags.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "Flags.add_pending": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "Flags.finalize_pending": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "Flags.is_": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "Flags.set": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "Flags.unset_all": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "NestedDict.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+       "NestedDict.append_nest_to_list": "method: calls a method that stays in CPython, stays in CPython",
+       "NestedDict.get_or_create_nest": "a decorated, dunder or non-plain-signature method stays in CPython",
+       "create_dict_rule": "not a typed candidate, stays in CPython",
+       "create_list_rule": "not a typed candidate, stays in CPython",
+       "is_unicode_scalar_value": "not a typed candidate, stays in CPython",
+       "key_value_rule": "not a typed candidate, stays in CPython",
+       "load": "not a typed candidate, stays in CPython",
+       "loads": "not a typed candidate, stays in CPython",
+       "make_safe_parse_float": "not a typed candidate, stays in CPython",
+       "parse_array": "not a typed candidate, stays in CPython",
+       "parse_basic_str": "not a typed candidate, stays in CPython",
+       "parse_basic_str_escape": "not a typed candidate, stays in CPython",
+       "parse_basic_str_escape_multiline": "not a typed candidate, stays in CPython",
+       "parse_hex_char": "not a typed candidate, stays in CPython",
+       "parse_inline_table": "not a typed candidate, stays in CPython",
+       "parse_key": "not a typed candidate, stays in CPython",
+       "parse_key_part": "not a typed candidate, stays in CPython",
+       "parse_key_value_pair": "not a typed candidate, stays in CPython",
+       "parse_literal_str": "not a typed candidate, stays in CPython",
+       "parse_multiline_str": "not a typed candidate, stays in CPython",
+       "parse_one_line_basic_str": "not a typed candidate, stays in CPython",
+       "parse_value": "not a typed candidate, stays in CPython",
+       "skip_chars": "not a typed candidate, stays in CPython",
+       "skip_comment": "not a typed candidate, stays in CPython",
+       "skip_comments_and_array_ws": "not a typed candidate, stays in CPython",
+       "skip_until": "not a typed candidate, stays in CPython",
+       "suffixed_err": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     }
+    }
+   },
+   "times": {
+    "cpython": 1.826758780000091,
+    "pypy": 1.0279793750000863,
+    "hybrid": 1.9413943060001202,
+    "hybrid_obs": 1.942666528000018,
+    "rust": 0.5611814949998006
+   },
+   "stdout_match": {
+    "hybrid": true,
+    "hybrid_obs": true,
+    "pypy": true,
+    "rust": true
+   },
+   "stdout": {
+    "cpython": "docs 5000 items 29966 digest 07a38e9c9bd3703b\n",
+    "pypy": "docs 5000 items 29966 digest 07a38e9c9bd3703b\n",
+    "hybrid": "docs 5000 items 29966 digest 07a38e9c9bd3703b\n",
+    "hybrid_obs": "docs 5000 items 29966 digest 07a38e9c9bd3703b\n",
+    "rust": "docs 5000 items 29966 digest 07a38e9c9bd3703b\n"
+   },
+   "errors": {},
+   "profile": "/tmp/wedge3-f_6rd9dd/obs_tomli.json"
+  },
+  "difflib": {
+   "workload": "difflib_bench.py",
+   "rust_impl": "rapidfuzz",
+   "modules": {
+    "difflib": "/usr/lib/python3.12/difflib.py"
+   },
+   "recorder_s": 2.832811862999961,
+   "builds": {
+    "plain": {
+     "difflib": {
+      "accelerated": [],
+      "rejected": {
+       "Differ.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+       "Differ._dump": "not a typed candidate, stays in CPython",
+       "Differ._fancy_helper": "method: calls a method that stays in CPython, stays in CPython",
+       "Differ._fancy_replace": "method: field self.charjunk has no scalar or int/float list kind, stays in CPython",
+       "Differ._plain_replace": "not a typed candidate, stays in CPython",
+       "Differ._qformat": "not a typed candidate, stays in CPython",
+       "Differ.compare": "method: field self.linejunk has no scalar or int/float list kind, stays in CPython",
+       "HtmlDiff.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._collect_lines": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._convert_flags": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._format_line": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._line_wrapper": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._make_prefix": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._split_line": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._tab_newline_replace": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff.make_file": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff.make_table": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "IS_CHARACTER_JUNK": "not a typed candidate, stays in CPython",
+       "IS_LINE_JUNK": "not a typed candidate, stays in CPython",
+       "SequenceMatcher.__chain_b": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.find_longest_match": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.get_grouped_opcodes": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.get_matching_blocks": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.get_opcodes": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.quick_ratio": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.ratio": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.real_quick_ratio": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.set_seq1": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.set_seq2": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.set_seqs": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_calculate_ratio": "not a typed candidate, stays in CPython",
+       "_check_types": "not a typed candidate, stays in CPython",
+       "_format_range_context": "not a typed candidate, stays in CPython",
+       "_format_range_unified": "not a typed candidate, stays in CPython",
+       "_keep_original_ws": "not a typed candidate, stays in CPython",
+       "_mdiff": "not a typed candidate, stays in CPython",
+       "_test": "not a typed candidate, stays in CPython",
+       "context_diff": "not a typed candidate, stays in CPython",
+       "diff_bytes": "not a typed candidate, stays in CPython",
+       "get_close_matches": "not a typed candidate, stays in CPython",
+       "ndiff": "not a typed candidate, stays in CPython",
+       "restore": "not a typed candidate, stays in CPython",
+       "unified_diff": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     }
+    },
+    "obs": {
+     "difflib": {
+      "accelerated": [],
+      "rejected": {
+       "Differ.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+       "Differ._dump": "not a typed candidate, stays in CPython",
+       "Differ._fancy_helper": "method: calls a method that stays in CPython, stays in CPython",
+       "Differ._fancy_replace": "method: field self.charjunk has no scalar or int/float list kind, stays in CPython",
+       "Differ._plain_replace": "not a typed candidate, stays in CPython",
+       "Differ._qformat": "not a typed candidate, stays in CPython",
+       "Differ.compare": "method: field self.linejunk has no scalar or int/float list kind, stays in CPython",
+       "HtmlDiff.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._collect_lines": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._convert_flags": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._format_line": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._line_wrapper": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._make_prefix": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._split_line": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff._tab_newline_replace": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff.make_file": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "HtmlDiff.make_table": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "IS_CHARACTER_JUNK": "not a typed candidate, stays in CPython",
+       "IS_LINE_JUNK": "not a typed candidate, stays in CPython",
+       "SequenceMatcher.__chain_b": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.__init__": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.find_longest_match": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.get_grouped_opcodes": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.get_matching_blocks": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.get_opcodes": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.quick_ratio": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.ratio": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.real_quick_ratio": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.set_seq1": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.set_seq2": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "SequenceMatcher.set_seqs": "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython",
+       "_calculate_ratio": "not a typed candidate, stays in CPython",
+       "_check_types": "not a typed candidate, stays in CPython",
+       "_format_range_context": "not a typed candidate, stays in CPython",
+       "_format_range_unified": "not a typed candidate, stays in CPython",
+       "_keep_original_ws": "not a typed candidate, stays in CPython",
+       "_mdiff": "not a typed candidate, stays in CPython",
+       "_test": "not a typed candidate, stays in CPython",
+       "context_diff": "not a typed candidate, stays in CPython",
+       "diff_bytes": "not a typed candidate, stays in CPython",
+       "get_close_matches": "not a typed candidate, stays in CPython",
+       "ndiff": "not a typed candidate, stays in CPython",
+       "restore": "not a typed candidate, stays in CPython",
+       "unified_diff": "not a typed candidate, stays in CPython"
+      },
+      "extension": null
+     }
+    }
+   },
+   "times": {
+    "cpython": 2.6127258490000713,
+    "pypy": 1.082045164000192,
+    "hybrid": 2.8074498389999007,
+    "hybrid_obs": 2.7790765949998786,
+    "rust": 0.8281617809998352
+   },
+   "stdout_match": {
+    "hybrid": true,
+    "hybrid_obs": true,
+    "pypy": true,
+    "rust": false
+   },
+   "stdout": {
+    "cpython": "pairs 60000 total 10091616 matches 3600 mtotal 3399723\n",
+    "pypy": "pairs 60000 total 10091616 matches 3600 mtotal 3399723\n",
+    "hybrid": "pairs 60000 total 10091616 matches 3600 mtotal 3399723\n",
+    "hybrid_obs": "pairs 60000 total 10091616 matches 3600 mtotal 3399723\n",
+    "rust": "pairs 60000 total 12014367 matches 3600 mtotal 3399723\n"
+   },
+   "errors": {},
+   "profile": "/tmp/wedge3-f_6rd9dd/obs_difflib.json"
+  }
+ },
+ "workspace": "/tmp/wedge3-f_6rd9dd",
+ "reasons": {
+  "networkx": {
+   "built_module_self_s": 4.9696,
+   "categories": {
+    "nested function / lambda / comprehension": 2.6161,
+    "pymix: not a typed candidate": 2.3535,
+    "module body": 0.0
+   },
+   "outside": {
+    "other library module not built": 0.1622
+   }
+  },
+  "jsonschema": {
+   "built_module_self_s": 1.184,
+   "categories": {
+    "nested function / lambda / comprehension": 0.7991,
+    "pymix: not a typed candidate": 0.3849,
+    "module body": 0.0,
+    "unreported": 0.0
+   },
+   "outside": {
+    "other library module not built": 0.4555
+   }
+  },
+  "chardet": {
+   "built_module_self_s": 0.013,
+   "categories": {
+    "method: class shape (bases/attributes)": 0.013,
+    "module body": 0.0,
+    "unreported": 0.0
+   },
+   "outside": {
+    "other library module not built": 1.5356
+   }
+  },
+  "tomli": {
+   "built_module_self_s": 1.5989,
+   "categories": {
+    "pymix: not a typed candidate": 1.3032,
+    "method: class shape (bases/attributes)": 0.1774,
+    "method: dunder/decorated/signature": 0.0842,
+    "nested function / lambda / comprehension": 0.0241,
+    "method: calls a refused method": 0.009,
+    "module body": 0.001,
+    "unreported": 0.0
+   },
+   "outside": {
+    "other library module not built": 0.0
+   }
+  },
+  "difflib": {
+   "built_module_self_s": 1.8099,
+   "categories": {
+    "method: class shape (bases/attributes)": 1.6975,
+    "nested function / lambda / comprehension": 0.0722,
+    "pymix: not a typed candidate": 0.0401,
+    "module body": 0.0,
+    "unreported": 0.0
+   },
+   "outside": {}
+  }
+ }
+}
