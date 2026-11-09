@@ -158,6 +158,147 @@ def main() -> None:
 main()
 '''
 
+SLICE = '''def main() -> None:
+    xs: list[int] = []
+    for v in (1, 2147483647, 2147483648, -2147483649, 7, 9):
+        xs.append(v)
+    a = xs[1:4]
+    for v in a:
+        print(v)
+    b = xs[:]
+    for v in b:
+        print(v)
+    c = xs[::2]
+    for v in c:
+        print(v)
+    d = xs[::-1]
+    for v in d:
+        print(v)
+    e = xs[2:]
+    for v in e:
+        print(v)
+    f = xs[:2]
+    for v in f:
+        print(v)
+    g = xs[-3:-1]
+    for v in g:
+        print(v)
+    h = xs[0:0]
+    print(len(h))
+    ys = xs[1:5:2]
+    print(len(ys), ys[0], ys[1])
+    print(xs[0], xs[1], xs[2], xs[3], xs[4], xs[5])
+
+main()
+'''
+
+COPY = '''def main() -> None:
+    xs: list[int] = []
+    for v in (2147483647, 2147483648, -2147483649, 0):
+        xs.append(v)
+    ys = xs.copy()
+    print(len(ys))
+    for v in ys:
+        print(v)
+    ys[0] = 5
+    print(xs[0], ys[0])
+    zs = list(xs)
+    for v in zs:
+        print(v)
+    ws = xs + ys
+    print(len(ws))
+    for v in ws:
+        print(v)
+    es: list[int] = []
+    t = es.copy()
+    print(len(t))
+    u = list(es)
+    print(len(u))
+    w = es + es
+    print(len(w))
+
+main()
+'''
+
+SORT = '''def main() -> None:
+    xs: list[int] = []
+    for v in (5, 2147483648, -3, 2147483647, -2147483649, 0):
+        xs.append(v)
+    xs.sort()
+    for v in xs:
+        print(v)
+    ys = sorted(xs)
+    for v in ys:
+        print(v)
+    print(len(xs))
+    es: list[int] = []
+    es.sort()
+    q = sorted(es)
+    print(len(q))
+
+main()
+'''
+
+KEYSORT = '''def main() -> None:
+    key: list[int] = []
+    for v in (5, 3, 5, 3, 5, 3):
+        key.append(v)
+    idx: list[int] = []
+    for i in range(len(key)):
+        idx.append(i)
+    idx.sort(key=lambda i: key[i])
+    print(idx)
+    order = sorted(idx, key=lambda i: key[i])
+    print(order)
+
+main()
+'''
+
+FIELD_SORT = '''class T:
+    def __init__(self) -> None:
+        self.w: list[int] = []
+
+    def do(self) -> None:
+        self.w.sort()
+
+    def show(self) -> None:
+        print(self.w[0], self.w[1], self.w[2])
+
+
+def main() -> None:
+    t = T()
+    t.w.append(3)
+    t.w.append(1)
+    t.w.append(2)
+    t.w.sort()
+    t.show()
+    t.w.sort(reverse=True)
+    t.show()
+    t.w.append(2147483648)
+    t.w.append(-2147483649)
+    t.do()
+    print(t.w[0], t.w[1], t.w[2], t.w[3], t.w[4])
+
+
+main()
+'''
+
+WIDE_KEYSORT = '''def main() -> None:
+    src: list[int] = []
+    for v in (4, 1, 3, 2):
+        src.append(v)
+    out = sorted(src, key=lambda v: v * 3000000000 + 5)
+    for v in out:
+        print(v)
+    twos: list[int] = []
+    for v in (9, 2, 2, 7):
+        twos.append(v)
+    q = sorted(twos, key=lambda v: (v % 3, -v))
+    print(q)
+
+main()
+'''
+
 EMPTY = '''def main() -> None:
     xs: list[int] = []
     print(len(xs))
@@ -250,6 +391,38 @@ class NarrowIntTests(unittest.TestCase):
 
     def test_empty_list(self):
         self.check('empty', EMPTY)
+
+    def test_slices_across_int32_boundary(self):
+        self.check('slice', SLICE)
+
+    def test_copy_and_concatenate(self):
+        self.check('copy', COPY)
+
+    def test_sort_of_widened_list(self):
+        self.check('sort', SORT)
+
+    def test_key_sort_equal_keys_are_stable(self):
+        self.check('keysort', KEYSORT)
+
+    def test_sort_on_narrowed_field(self):
+        self.check('field_sort', FIELD_SORT)
+
+    def test_key_sort_column_stored_narrow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, 'ksn.py')
+            path.write_text(KEYSORT)
+            dbg = Path(tmp, 'dbg')
+            env = dict(os.environ, AIL_NO_CACHE='1', AIL_NARROW_INT='1', PYTHONHASHSEED='0')
+            built = subprocess.run(
+                [sys.executable, '-B', str(AIL), 'compile', str(path), '-o', str(Path(tmp, 'ksn')),
+                 '--debug-dir', str(dbg)],
+                capture_output=True, text=True, timeout=600, env=env)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            program = (dbg / 'program.c').read_text()
+            self.assertRegex(program, r'ail_ilist v__ail_sk\d+_c\d+ = \{0\};')
+
+    def test_key_sort_column_widens_exactly(self):
+        self.check('wide_keysort', WIDE_KEYSORT)
 
     def test_write_index_text_matches_across_builds(self):
         source = ('def main() -> None:\n    xs: list[int] = []\n    xs.append(1)\n'
