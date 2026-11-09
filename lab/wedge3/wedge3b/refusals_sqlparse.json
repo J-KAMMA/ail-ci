@@ -1,0 +1,151 @@
+{
+ "profile_functions": 147,
+ "total_self_s": 6.2219,
+ "native_self_s": 0.0,
+ "native_functions": 0,
+ "rows": [
+  {
+   "category": "method (class with decorators/bases/metaclass)",
+   "self_s": 3.3272,
+   "share": 53.47,
+   "functions": 28,
+   "modules": [
+    "lexer.py",
+    "sql.py",
+    "tokens.py"
+   ],
+   "examples": [
+    "lexer.py.Lexer.add_keywords",
+    "lexer.py.Lexer.clear",
+    "lexer.py.Lexer.default_initialization",
+    "lexer.py.Lexer.get_default_instance",
+    "lexer.py.Lexer.get_tokens",
+    "lexer.py.Lexer.is_keyword"
+   ],
+   "reasons": {
+    "method of a class with decorators, bases, a metaclass or class attributes, stays in CPython": 28
+   }
+  },
+  {
+   "category": "not-a-typed-candidate",
+   "self_s": 1.5024,
+   "share": 24.15,
+   "functions": 36,
+   "modules": [
+    "engine/grouping.py",
+    "lexer.py",
+    "utils.py"
+   ],
+   "examples": [
+    "engine/grouping.py._group",
+    "engine/grouping.py._group_matching",
+    "engine/grouping.py._is_delimiter",
+    "engine/grouping.py.align_comments",
+    "engine/grouping.py.group",
+    "engine/grouping.py.group_aliased"
+   ],
+   "reasons": {
+    "not a typed candidate, stays in CPython": 36
+   }
+  },
+  {
+   "category": "nested function (not a unit)",
+   "self_s": 0.8668,
+   "share": 13.93,
+   "functions": 28,
+   "modules": [
+    "engine/grouping.py",
+    "engine/statement_splitter.py",
+    "filters/reindent.py",
+    "sql.py",
+    "utils.py"
+   ],
+   "examples": [
+    "engine/grouping.py.group_arrays.<locals>.match",
+    "engine/grouping.py.group_as.<locals>.match",
+    "engine/grouping.py.group_assignment.<locals>.match",
+    "engine/grouping.py.group_comparison.<locals>.match",
+    "engine/grouping.py.group_comparison.<locals>.post",
+    "engine/grouping.py.group_comparison.<locals>.valid"
+   ],
+   "reasons": {
+    "(none)": 28
+   }
+  },
+  {
+   "category": "method (field kind not expressible)",
+   "self_s": 0.4544,
+   "share": 7.3,
+   "functions": 15,
+   "modules": [
+    "engine/statement_splitter.py",
+    "filters/reindent.py"
+   ],
+   "examples": [
+    "engine/statement_splitter.py.StatementSplitter._change_splitlevel",
+    "engine/statement_splitter.py.StatementSplitter._handle_closing_keyword",
+    "engine/statement_splitter.py.StatementSplitter._reset",
+    "engine/statement_splitter.py.StatementSplitter.process",
+    "filters/reindent.py.ReindentFilter._current_line_len",
+    "filters/reindent.py.ReindentFilter._get_offset"
+   ],
+   "reasons": {
+    "method: field self._block_stack has no scalar or int/float list kind, stays in CPython": 2,
+    "method: self is stored to or used other than by reading an attribute (field write-back is opt-in: AIL_HYBRID_FIELD_STORES=1), stays in CPython": 2,
+    "method: field self.tokens has no scalar or int/float list kind, stays in CPython": 1,
+    "method: field self._curr_stmt has no scalar or int/float list kind, stays in CPython": 1,
+    "method: field self.leading_ws has no scalar or int/float list kind, stays in CPython": 1,
+    "method: self is stored to or used other than by reading an attribute, stays in CPython": 4,
+    "method: calls a method that stays in CPython, stays in CPython": 3,
+    "method: field self._last_stmt has no scalar or int/float list kind, stays in CPython": 1
+   }
+  },
+  {
+   "category": "method (decorated/dunder/non-plain signature)",
+   "self_s": 0.0701,
+   "share": 1.13,
+   "functions": 6,
+   "modules": [
+    "engine/statement_splitter.py",
+    "filters/reindent.py"
+   ],
+   "examples": [
+    "engine/statement_splitter.py.StatementSplitter.__init__",
+    "filters/reindent.py.ReindentFilter.__init__",
+    "filters/reindent.py.ReindentFilter._next_token",
+    "filters/reindent.py.ReindentFilter._process_default",
+    "filters/reindent.py.ReindentFilter.leading_ws",
+    "filters/reindent.py.ReindentFilter.nl"
+   ],
+   "reasons": {
+    "a decorated, dunder or non-plain-signature method stays in CPython": 6
+   }
+  },
+  {
+   "category": "not recorded (silent refusal)",
+   "self_s": 0.001,
+   "share": 0.02,
+   "functions": 34,
+   "modules": [
+    "engine/grouping.py",
+    "engine/statement_splitter.py",
+    "filters/reindent.py",
+    "lexer.py",
+    "sql.py",
+    "tokens.py",
+    "utils.py"
+   ],
+   "examples": [
+    "engine/grouping.py.<module>",
+    "engine/statement_splitter.py.<module>",
+    "engine/statement_splitter.py.StatementSplitter",
+    "filters/reindent.py.<module>",
+    "filters/reindent.py.ReindentFilter",
+    "lexer.py.<module>"
+   ],
+   "reasons": {
+    "(none)": 34
+   }
+  }
+ ]
+}

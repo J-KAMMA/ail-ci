@@ -1,0 +1,204 @@
+{
+ "pydantic": {
+  "workload": "pydantic_records.py",
+  "cpython_sha": "6d3174a118f5eeac",
+  "variants": {
+   "cpython": {
+    "cmd": [
+     "/tmp/w3b/vpure/bin/python",
+     "/home/runner/work/ail-ci/ail-ci/lab/wedge3/wedge3b/workloads/pydantic_records.py"
+    ],
+    "median_s": 1.2711,
+    "all_s": [
+     1.2686,
+     1.2711,
+     1.2726,
+     1.2876,
+     1.2657
+    ],
+    "rc": 0,
+    "sha": "6d3174a118f5eeac",
+    "match": true,
+    "instructions": null,
+    "instructions_error": "perf_event_open: Permission denied"
+   },
+   "pypy310": {
+    "cmd": [
+     "/tmp/w3b/vpypy/bin/python",
+     "/home/runner/work/ail-ci/ail-ci/lab/wedge3/wedge3b/workloads/pydantic_records.py"
+    ],
+    "median_s": 0.5027,
+    "all_s": [
+     0.5002,
+     0.5255,
+     0.5027,
+     0.5015,
+     0.5098
+    ],
+    "rc": 0,
+    "sha": "6d3174a118f5eeac",
+    "match": true,
+    "instructions": null,
+    "instructions_error": "perf_event_open: Permission denied"
+   },
+   "hybrid_plain": {
+    "cmd": [
+     "/tmp/w3b/vpure/bin/python",
+     "/home/runner/work/ail-ci/ail-ci/lab/wedge3/wedge3b/workloads/pydantic_records.py"
+    ],
+    "median_s": 1.2628,
+    "all_s": [
+     1.2763,
+     1.2679,
+     1.2555,
+     1.2628,
+     1.2574
+    ],
+    "rc": 0,
+    "sha": "6d3174a118f5eeac",
+    "match": true,
+    "instructions": null,
+    "instructions_error": "perf_event_open: Permission denied"
+   },
+   "hybrid_obs": {
+    "cmd": [
+     "/tmp/w3b/vpure/bin/python",
+     "/home/runner/work/ail-ci/ail-ci/lab/wedge3/wedge3b/workloads/pydantic_records.py"
+    ],
+    "median_s": 1.28,
+    "all_s": [
+     1.2783,
+     1.393,
+     1.2924,
+     1.2769,
+     1.28
+    ],
+    "rc": 0,
+    "sha": "6d3174a118f5eeac",
+    "match": true,
+    "instructions": null,
+    "instructions_error": "perf_event_open: Permission denied"
+   },
+   "native": {
+    "cmd": [
+     "/tmp/w3b/vnative/bin/python",
+     "/home/runner/work/ail-ci/ail-ci/lab/wedge3/wedge3b/workloads/pydantic_records.py"
+    ],
+    "median_s": 0.541,
+    "all_s": [
+     0.5407,
+     0.541,
+     0.5512,
+     0.5412,
+     0.5403
+    ],
+    "rc": 0,
+    "sha": "6d3174a118f5eeac",
+    "match": true,
+    "instructions": null,
+    "instructions_error": "perf_event_open: Permission denied"
+   }
+  }
+ },
+ "sqlparse": {
+  "workload": "sql_workload.py",
+  "cpython_sha": "8f21ed482c9598f3",
+  "variants": {
+   "cpython": {
+    "cmd": [
+     "/tmp/w3b/vpure/bin/python",
+     "/home/runner/work/ail-ci/ail-ci/lab/wedge3/wedge3b/workloads/sql_workload.py"
+    ],
+    "median_s": 2.0194,
+    "all_s": [
+     2.0355,
+     2.0194,
+     1.9641,
+     1.9526,
+     2.0591
+    ],
+    "rc": 0,
+    "sha": "8f21ed482c9598f3",
+    "match": true,
+    "instructions": null,
+    "instructions_error": "perf_event_open: Permission denied"
+   },
+   "pypy310": {
+    "cmd": [
+     "/tmp/w3b/vpypy/bin/python",
+     "/home/runner/work/ail-ci/ail-ci/lab/wedge3/wedge3b/workloads/sql_workload.py"
+    ],
+    "median_s": 4.326,
+    "all_s": [
+     4.326,
+     4.322,
+     4.7422,
+     4.1856,
+     4.3935
+    ],
+    "rc": 0,
+    "sha": "8f21ed482c9598f3",
+    "match": true,
+    "instructions": null,
+    "instructions_error": "perf_event_open: Permission denied"
+   },
+   "hybrid_plain": {
+    "cmd": [
+     "/tmp/w3b/vpure/bin/python",
+     "/home/runner/work/ail-ci/ail-ci/lab/wedge3/wedge3b/workloads/sql_workload.py"
+    ],
+    "median_s": 1.9965,
+    "all_s": [
+     2.0088,
+     1.9965,
+     1.9867,
+     2.0114,
+     1.9758
+    ],
+    "rc": 0,
+    "sha": "8f21ed482c9598f3",
+    "match": true,
+    "instructions": null,
+    "instructions_error": "perf_event_open: Permission denied"
+   },
+   "hybrid_obs": {
+    "cmd": [
+     "/tmp/w3b/vpure/bin/python",
+     "/home/runner/work/ail-ci/ail-ci/lab/wedge3/wedge3b/workloads/sql_workload.py"
+    ],
+    "median_s": 1.9469,
+    "all_s": [
+     1.9596,
+     1.9462,
+     1.9469,
+     1.9407,
+     1.9546
+    ],
+    "rc": 0,
+    "sha": "8f21ed482c9598f3",
+    "match": true,
+    "instructions": null,
+    "instructions_error": "perf_event_open: Permission denied"
+   },
+   "native": {
+    "cmd": [
+     "/tmp/w3b/vnative/bin/python",
+     "/home/runner/work/ail-ci/ail-ci/lab/wedge3/wedge3b/workloads/sql_workload.py"
+    ],
+    "median_s": 0.7139,
+    "all_s": [
+     0.7253,
+     0.7234,
+     0.7035,
+     0.6934,
+     0.7139
+    ],
+    "rc": 0,
+    "sha": "8f21ed482c9598f3",
+    "match": true,
+    "instructions": null,
+    "instructions_error": "perf_event_open: Permission denied"
+   }
+  }
+ }
+}
