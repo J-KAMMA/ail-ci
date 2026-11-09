@@ -1,3 +1,30 @@
+## 2026-11-09 -- fbred4 suite fix: the PARRED harnesses use the pointer-array accumulator ABI (job-fbred4_rr2-11091430)
+
+fbred4 changed the reduction runtime to pass the accumulators as `volatile int64_t **`
+and to have the re-run write each one back through its pointer into the enclosing local,
+which is what keeps the sequential prefix in the accumulator after a `try` catches the
+body's exception.  `test_ail_par_reduce_rt`'s C harness still passed the old `int64_t *`
+shared array, so `ail_red_combine` dereferenced the accumulator values as pointers and the
+parallel child died with SIGSEGV at `AIL_THREADS` 2, 4 and 16 (300-case differential and
+the hand cases).  The harness now builds `volatile int64_t *accp[]` for `red_rerun`,
+`c_rerun` and `red_child`; `test_ail_par_sched`'s `REDUCE` harness had the same stale ABI
+(it only stayed sequential on its 200000-term workload) and is updated the same way.  No
+compiler or runtime file changed.
+
+Probes (`PYTHONPATH=$PWD/AIL_CURRENT bash ~/tools/cmp.sh <p> $PWD`, general and default
+builds; the general path refuses `par_range` by name): `p_acc_try` (catchable
+`OverflowError`, handler prints the sequential prefix), `p_acc_try_zero`
+(`ZeroDivisionError`, prefix `caught 3`), `p_acc_arg` (start from an argument),
+`p_acc_list` (start from a list item), `p_acc_dict` (start from a dict value),
+`p_acc_attr` (start from an attribute), `p_acc_two` (two accumulators, negative range),
+`p_acc_small` (n = 0, n = 1, three items), `p_acc_edge` (`INT64_MAX + INT64_MIN` then
+zeros), `p_acc_alias` (two names for one list), `p_acc_called_twice` (two bases).  All 11
+match CPython on the default build; every general-path build is refused by name.
+
+Tests on the final commit, `-j 2`: `test_ail_par_reduce_rt`, `test_ail_par_sched`,
+`test_ail_par_reduce`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
+
 ## 2026-11-08 -- stdfall2c review 2: set/frozenset deepcopy copies each element (job-rbstdfall2c-11081827)
 
 Fixes the remaining stdfall2c defect.  `copy.deepcopy` of a `set`/`frozenset` used
