@@ -60,6 +60,28 @@ shown right, 7 deliberately empty) and passes.
 
 Tests on the final commit, `-j 2`: `test_ail_lsp`, `test_ail_lsp_def`, `test_ail_lsp_hover`,
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` -- 6 modules, 0 failed, 283 s.
+## 2026-11-08 -- re-apply err3 on the current tree (job-rberr3-11082308)
+
+Re-applied the accepted `err3` change (`job-err3-11081940`) on top of the current tree. It has
+two parts.  `AIL_CURRENT/python/pkg-v12/pyfunc.py`: the `AIL0102` row-arity note now names the
+user's own row variable and every heap it was popped from, never the lowering temporary
+`_ail_l1l`; `_row_alias_group`/`_row_pop_sites` follow `a = b` links and report the first user
+pop site, the `_ail_l1r = X[0]` companion no longer widens a heap, and a read wider than the heap
+is reported after the fixed point settles.  `AIL_CURRENT/ail_agent_errors.py` and
+`AIL_CURRENT/ail_chatgpt.py`: the prelude note picks the user's call that actually reaches the
+definition.  `_prelude_origin` recognizes any definition a shipped prelude added
+(`fractions`/`decimal`/`unicodedata`/`ipaddress`), and `_prelude_call_site` follows the prelude
+type through assignments, aliases, list/dict items, attributes, returns and call arguments, so a
+later `float(3)` or `f"{1.5:.1f}"` is not chosen.  `AIL0102` is now authoritative (its locator
+renames the first conflicting binding).
+
+Tests: `test_ail_pre133.py` and `test_ail_agent_errors.py` gain the row-arity message check, the
+renamed `poprow_renamed` variant and the prelude call-site cases; `tests.d/test_ail_pre133.txt`
+registers the module (the tuple is untouched).  `lab/err/RESULTS.md` records the re-measure and
+`lab/err/fixrate_err3.json` the raw replies.  `tools/diff_ids.py` is not present on this tree, so
+only `tools/update_manifest.py` ran (and `--check` passes).  The final tests are
+`test_ail_pre133`, `test_ail_agent_errors`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` -- 5 modules, 0 failed.
 
 ## 2026-11-08 -- wedge2: hybrid-native functions index lists and dicts (job-wedge2-11081603)
 
@@ -125,6 +147,67 @@ overflow.  An extra `AIL_EXACT_INT=1` probe showed the default build still stops
 that exact-int edge is outside this finding and was not changed.  Tests on
 this commit, `-j 2`: test_ail_fz240, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3
 (4/4, 339 s); manifest `--check` clean.
+## 2026-11-08 -- shparse1 gate reproduced: CPython 3.12.16 f-string AST, not a parser bug (job-shparse1-11090331)
+
+The gate was right this time, and the earlier two rounds missed why.  CI's `actions/setup-python`
+`python-version: '3.12'` installs **3.12.16**, while the runner's `/usr/bin/python3` is **3.12.3**;
+the two CPython patch releases build *different* `ast` trees for a format spec.  3.12.0-3.12.3 (the
+reference `lab/selfhost/PARSE.md` was measured on) gives a spec an empty `Constant(value='')` before
+each `{{` group and after a spec that ends in a replacement field; 3.12.4+ dropped some of those and
+moved an escaped `{{` out of the spec into literal text of the enclosing f-string.  So
+`f'{x:{{}}}'` is `[Constant(''), FormattedValue(Dict()), Constant('')]` on 3.12.3 and
+`[FormattedValue(Dict())]` on 3.12.16, and `f'{x:{{}}{{}}}'` keeps a literal `'}'` on 3.12.16, while
+`f'{x:{{}}{{}}{{}}}'` is a `SyntaxError` there.  `ailparse` was right all along: on 3.12.16 it
+reproduces the pinned 3.12.3 dump for all 13 divergent edge expressions.  The earlier rounds ran on
+3.12.3 and so saw nothing.
+
+`test_ail_selfhost_parse.py` now compares against a spelling-independent expectation instead of the
+running interpreter's: `_strip_empty_constants` removes CPython's empty `Constant(value='')`
+placeholders (and the comma that joins them) from both sides, and `REF_PINS` writes out the
+documented 3.12.3 dump for the six specs whose *structure* differs rather than just the empty nodes.
+Both spellings evaluate to the same string on every version.  No compiler or parser file changed.
+
+Counts, `python3 -m unittest -q test_ail_selfhost_parse`: **3.12.3 5/5 pass, 3.12.16 5/5 pass**
+(3.12.16 was 12 failures + 1 error before).  The other four flagged modules pass on both (obj_refs
+3/3, safetynet 5/5, unified 14/14, virtual_dispatch 6/6).  Full S376 (164,185 parseable segments)
+compares clean after the same normalization on both versions.  Probes
+`/tmp/probes/p1_fstring_specs.py` and `/tmp/probes/p2_braces_runtime.py` match CPython on the
+default and `AIL_UNIFIED_FORCE=1` builds, and print byte-identically on 3.12.3 and 3.12.16.  No
+DIFFERENCES row: this is a test-expectation fix, not an output difference.
+
+## 2026-11-08 -- shparse1 suite gate again: the five flagged modules still pass (job-shparse1-11090009)
+
+The gate repeated the same five modules (`test_ail_obj_refs`, `test_ail_safetynet`,
+`test_ail_selfhost_parse`, `test_ail_unified`, `test_ail_virtual_dispatch`) as failing on today's
+integ.  They still do not reproduce.  On this branch (`71c7a03`) each one passes individually, and
+`tools/par_check.py -j 2` over the five plus `test_ail_files` and `test_ail_corpus_findings3`
+is 7/7 modules, 0 failed.  Applied alone on today's `origin/integ` (`e4335ec`, fetched fresh) in a
+worktree with the feature diff (`5e98aa2b..HEAD`, `.agent` and `DEVLOG.md` excluded) the same five
+also pass.  No compiler or parser behaviour is wrong: these are the fixed smoke modules that the
+change's `selfhost/*` paths select, and the module that passed (`test_ail_files`) is simply absent
+from the report, exactly as the `11082103` entry above describes.  The defensive S376 widening is
+already present in `test_ail_selfhost_parse.py`, so this round needs no source edit.  No behaviour
+changed, so there are no new probes; `tools/update_manifest.py --check` is clean.
+
+## 2026-11-08 -- shparse1 suite gate: the five flagged modules pass; harden the S376 sample (job-shparse1-11082103)
+
+The gate reported `test_ail_obj_refs`, `test_ail_safetynet`, `test_ail_selfhost_parse`, `test_ail_unified`
+and `test_ail_virtual_dispatch` as failing on today's integ.  They do not reproduce against any base
+tried.  On the branch (`1c7e4dc`) all five pass; on `origin/integ` (`f7bada0`) with the branch diff
+applied (`git apply --3way`, the culprit procedure's exclusions) all five pass; on `origin/integ` with
+only the earlier feature tip `b3f6344` (before `a59af76`) all five also pass; pure `origin/integ` runs
+the four non-selfhost modules green.  `tools/par_check.py -j 2` on the six smoke modules
+(`obj_refs`, `safetynet`, `selfhost_parse`, `unified`, `virtual_dispatch`, `files`) is 6/6 modules,
+0 failed in 339 s, and `tools/update_manifest.py --check` and `tools/ci_shards.py --check` are clean.
+`tools/ci_plan.py --files` explains the list: the branch carries `selfhost/*`, `.github/` and
+`corpus/`, which select the fixed smoke set plus `test_ail_selfhost_parse`; `test_ail_files` is the one
+fixed module that passed, so only the other five reached the report.  No parser or compiler change is
+needed.  The only edit is defensive: `test_ail_selfhost_parse.py` now widens the S376 scan past the
+30-file stride if a future corpus edit leaves fewer than 200 parseable segments, instead of failing on
+`len(texts) == 200`; on today's corpus the stride already yields 200, so the test is unchanged.
+Tests on the final commit: `test_ail_selfhost_parse` (5/5), `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`; `python3 tools/update_manifest.py` then `--check`.
+
 ## 2026-11-08 -- err2_fix1: legacy SDK discovery carries the compiler-imported error module (job-err2_fix1-11080948)
 
 `test_ail_sdk` was green before err2 and its
