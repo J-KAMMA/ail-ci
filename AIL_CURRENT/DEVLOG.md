@@ -101,6 +101,64 @@ class body's last binding (`count() -> int` then `count() -> bool` hovers `bool`
 duplicates still resolve. Regression tests `ReturnResolution` in `test_ail_lsp_hover.py` cover both
 defects and the same-annotation boundary; the existing 45 hover cases still pass. No compiler
 change: the probes' C output is unchanged.
+## 2026-11-09 -- rbsetord2_rr1 full suite: `test_ail_bigint` size gate after the set-order emulation (job-rbsetord2_rr1-11090751)
+
+`test_ail_bigint.DefaultBuild.test_constant_math_and_float_programs_are_exact` failed with my change in
+the tree: `gate_math_constants` built 152,288 B against its `exe.stat().st_size < 150000` assertion. That
+program uses no set at all; the CPython set-table emulation added about 8.3 KB of `.text` to the
+monolithic general runtime (`OBJ2`), and an exact-int general build pays for it (integration base
+143,984 B, +8,304 B).
+
+The emulation code is unchanged; only its emission changed, in `python/pkg-v12/cruntime.py`:
+
+- `ail_setx_det`'s tuple/frozenset recursion is out of line in a new `ail_setx_det_deep`, so the
+  recursive scan is one copy instead of being inlined into every `ail_setx_add_entry` caller.
+- `ail_setx_ct_resize`, `ail_setx_rebuild`, `ail_setx_merge`, `ail_setx_filter` and `ail_setx_det_deep`
+  are `noinline, cold`; `ail_setx_difference` (which exists only for the `len(a)>>2 > len(b)`
+  heuristic) is `noinline`. gcc puts the cold ones in a separate section, which is what recovers the
+  bytes: `noinline` alone still built 152,248 B, `cold` brings it to 148,392 B (1,608 B of headroom).
+
+`gate_math_constants` now builds 148,392 B and prints CPython's nine values; `b1_strloop`'s 120,000 B
+gate was already passing and is unchanged. Probes (`bash ~/tools/cmp.sh <p> $PWD`): `s1_table_order`
+(add-through-a-dict-order set, pop drains, remove/re-add dummies, negative and 64-bit keys, values
+through an argument, list item, attribute and dict value, empty/single/bool/tuple/frozenset) matches
+CPython on both builds except the mixed `str` line, which is CPython's per-run random order (DIFFERENCES
+A2); `s2_ops` (union/intersection/difference/symmetric_difference and the four in-place forms, both
+sides of the difference threshold, empty/self) matches; `s3_pop_growth` (pop after add/growth, a
+64-element drain, clear-and-rebuild, empty `pop` KeyError text) matches; `s4_views` (dict views against
+sets and frozensets) matches. `s5_exact_set` and `s6_noset` also match on `AIL_EXACT_INT=1` with and
+without `AIL_UNIFIED_FORCE=1`. Two `noinline`-only variants were measured and rejected (152,248 /
+152,472 B).
+
+Tests on the final commit, `-j 2`: `test_ail_bigint` (67 tests, 358.2 s), `test_ail_setorder`,
+`test_ail_sets_general`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 0 failed.
+`tools/update_manifest.py` regenerated the `cruntime.py` pin and `--check` passes.
+
+## 2026-11-08 -- rbsetord2_rr1 full suite: `set.pop()` tests follow the accepted table order (job-rbsetord2_rr1-11081957)
+
+`test_ail_gaps_api2.SetPop` still expected `set.pop()` to be refused by name, which the re-applied
+setord2 change intentionally removed. The int-only pop programs now compare against CPython on the
+general and default builds: the fixed `SET_POP` program, an untyped fuzz that mixes add/discard/pop
+with iteration (directly and through a function argument), and a typed `set[int]` fuzz. The
+order-sensitive rolling hash makes a wrong popped element or a wrong remaining walk fail. The
+module's 14 tests pass; `test_ail_setorder` (S11) and `test_ail_safetynet` stay green.
+
+## 2026-11-08 -- rbsetord2_rr1 fix: `symmetric_difference_update` / `^=` in-place order (job-rbsetord2_rr1-11081957)
+
+Fixed the last review defect: `set.symmetric_difference_update`/`^=` computed `a ^ b` (copy the
+other set, walk `a`) and swapped bodies, while CPython mutates `a` in place walking the *other*
+operand's table order. The boxed `ail_setx_symmetric_difference_update_set` and the typed
+`set[int]` `^=` (`ail_iset_xor_update`, selected only for the augmented form) now start from `a`
+and toggle each key of `b` in `b`'s order; the non-in-place `^`/`symmetric_difference` keep the
+copy-`b` order. A dict argument follows CPython's dict fast path (insertion order); any other
+iterable is built into a set first, as CPython does. `test_ail_setorder.py` gains S11
+(`SDU_ORDER`, `TYPED_SDU`). 12 probes in `/tmp/probes` (minimal, large, `^=`, typed, typed method,
+dict insertion order, list/tuple/range/iterator/generator, frozenset, alias/self, empty, values
+through an argument/list item/field/dict value, non-in-place `^`) match CPython on both builds.
+`tools/diff_ids.py` is absent on this tree; `tools/update_manifest.py` and `--check` run. Tests on
+the final commit, `-j 2`: `test_ail_setorder`, `test_ail_sets_general`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`.
+
 ## 2026-11-07 -- fclist1 re-applied: element-written list parameters pass the caller's buffer in place (job-rbfclist1-11071012)
 
 Re-applied the accepted `job-fclist1-op1106` change (`8c2c99c1`..`FETCH_HEAD`, 3 commits) on this

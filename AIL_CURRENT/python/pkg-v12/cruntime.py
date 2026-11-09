@@ -14786,8 +14786,13 @@ typedef struct { ail_gcobj hdr; ail_mapentry *entries; int64_t n, cap; int64_t *
 /* set / frozenset: insertion-ordered like the typed path's sets (DIFFERENCES.md A2). An entry whose key tag is UNBOUND is a
    hole left by a removal; `n` counts entries used including holes, `used` the live ones. */
 typedef struct { ail_obj key; int64_t hash; } ail_setentry;
-/* `fin`: every entry before it is a hole (set.pop() takes the first live entry and moves it on, so draining a set is linear) */
-typedef struct { ail_gcobj hdr; ail_setentry *ent; int64_t n, cap, used; int64_t *index; int64_t index_cap; int64_t fin; } ail_setobj;
+/* `fin`: every entry before it is a hole (set.pop() takes the first live entry and moves it on, so draining a set is linear).
+   `ctab`/`cmask`/`cf`/`cu`: an exact CPython hash-table layout over the entries, used when every element has a deterministic
+   CPython hash (int, bool, None, float, tuples of those). A slot holds an index into `ent`, or -1 (empty) / -2 (dummy).
+   `co` is 0 once a str, bytes or other random-hash element joins: then iteration keeps insertion order, as CPython's own
+   order is a per-run random one. */
+typedef struct { ail_gcobj hdr; ail_setentry *ent; int64_t n, cap, used; int64_t *index; int64_t index_cap; int64_t fin;
+                 int64_t *ctab; int64_t cmask, cf, cu; int8_t co; } ail_setobj;
 #define AIL_SETOBJ(x) ((ail_setobj *)(x).o)
 #define AIL_IS_ANYSET(t) ((t) == AIL_T_SET || (t) == AIL_T_FROZENSET)
 /* dict views: d.keys() 1, d.values() 2, d.items() 3 are lists (snapshots) whose header says what they stand for; the
@@ -14937,7 +14942,7 @@ static inline void ail__free_payload(ail_gcobj *o) {
     switch (o->kind) {
         case AIL_K_LIST: case AIL_K_TUPLE: free(((ail_vecobj *)o)->p); break;
         case AIL_K_DICT: free(((ail_mapobj *)o)->entries); free(((ail_mapobj *)o)->index); break;
-        case AIL_K_SET: free(((ail_setobj *)o)->ent); free(((ail_setobj *)o)->index); break;
+        case AIL_K_SET: free(((ail_setobj *)o)->ent); free(((ail_setobj *)o)->index); free(((ail_setobj *)o)->ctab); break;
         case AIL_K_INST: free(((ail_instobj *)o)->attrs); break;
         case AIL_K_CLASS: free(((ail_classobj *)o)->ca); free(((ail_classobj *)o)->attrs); break;
         case AIL_K_FUNC: free(((ail_funcobj *)o)->cells); break;
@@ -16575,18 +16580,158 @@ static inline void ail_setx_alloc(ail_setobj *so, int64_t cap) {
     for (int64_t i = 0; i < so->index_cap; i++) so->index[i] = -1;
     so->cap = cap; so->n = 0; so->used = 0; so->fin = 0;
 }
+static inline int64_t ail_setx_ct_bytes(int64_t cap);
+static inline void ail_setx_ct_alloc(ail_setobj *so);
 static inline ail_obj ail_setx_new(ail_ctx *cx, int frozen) {
     ail_setobj *s = (ail_setobj *)ail_gc_alloc(cx, AIL_K_SET, sizeof(ail_setobj));
     ail_setx_alloc(s, 8);
     ail_setx_account(cx, s, ail_setx_bytes(8));
+    s->co = 1;
+    ail_setx_ct_alloc(s);
+    ail_setx_account(cx, s, ail_setx_ct_bytes(8));
     ail_obj r; memset(&r, 0, sizeof r); r.tag = frozen ? AIL_T_FROZENSET : AIL_T_SET; r.o = (ail_gcobj *)s; return r;
 }
 static inline ail_obj ail_set_new(ail_ctx *cx) { return ail_setx_new(cx, 0); }
 static inline ail_obj ail_frozenset_new(ail_ctx *cx) { return ail_setx_new(cx, 1); }
 
+/* ===================================================================================
+   CPython set-table emulation. CPython's set iteration order is the layout of its open
+   addressed table: the same size (8 slots, doubling on a 3/5 fill), the same linear-then-
+   perturbed probing (LINEAR_PROBES 9, PERTURB_SHIFT 5) and the same deletion dummies. The
+   table below mirrors set_add_entry / set_insert_clean / set_table_resize exactly, but its
+   slots hold an index into `ent` instead of a key, so the existing storage and GC stay put.
+   Only elements whose CPython hash is deterministic are placed here: int, bool, None,
+   float and tuples of those. A str / bytes element makes CPython's order random per run,
+   so from then on the set keeps insertion order (one valid CPython run, no refusal).
+   =================================================================================== */
+#define AIL_CS_EMPTY (-1)
+#define AIL_CS_DUMMY (-2)
+#define AIL_CS_LINEAR 9
+#define AIL_CS_PERTURB 5
+
+static inline __attribute__((noinline, cold)) int ail_setx_det_deep(ail_obj key);
+static inline int ail_setx_det(ail_obj key) {
+    switch (key.tag) {
+        case AIL_T_INT: case AIL_T_BOOL: case AIL_T_NONE: return 1;
+        case AIL_T_FLOAT: { double v = ail_float_val(key); return v == v; }   /* a NaN hashes by identity */
+        case AIL_T_TUPLE: case AIL_T_FROZENSET: return ail_setx_det_deep(key);
+        default: return 0;
+    }
+}
+/* the container cases, out of line: `ail_setx_det` is on the set-add path of every program that
+   builds a set, and the recursion belongs in one copy, not inlined at every call site. */
+static __attribute__((noinline, cold)) int ail_setx_det_deep(ail_obj key) {
+    if (key.tag == AIL_T_TUPLE) {
+        ail_vecobj *v = (ail_vecobj *)key.o;
+        for (int64_t i = 0; i < v->n; i++) if (!ail_setx_det(v->p[i])) return 0;
+        return 1;
+    }
+    /* frozenset_hash only depends on the elements' stored hashes, so a frozenset of
+       deterministic keys has a deterministic hash too (nested frozensets included). */
+    ail_setobj *s = AIL_SETOBJ(key);
+    for (int64_t i = 0; i < s->n; i++)
+        if (ail_setx_live(&s->ent[i]) && !ail_setx_det(s->ent[i].key)) return 0;
+    return 1;
+}
+static inline int64_t ail_setx_ct_bytes(int64_t cap) { return cap * (int64_t)sizeof(int64_t); }
+static inline void ail_setx_ct_alloc(ail_setobj *so) {
+    so->cmask = 7; so->cf = so->cu = 0;
+    so->ctab = (int64_t *)ail_xmalloc((size_t)8 * sizeof(int64_t));
+    for (int64_t i = 0; i < 8; i++) so->ctab[i] = AIL_CS_EMPTY;
+}
+static inline void ail_setx_ct_release(ail_ctx *cx, ail_setobj *so) {
+    if (!so->ctab) return;
+    int64_t cap = so->cmask + 1;
+    free(so->ctab); so->ctab = 0;
+    so->cmask = 0; so->cf = so->cu = 0;
+    ail_setx_account(cx, so, -ail_setx_ct_bytes(cap));
+}
+static inline void ail_setx_ct_insert_clean(int64_t *tab, int64_t mask, int64_t idx, int64_t hash) {
+    uint64_t perturb = (uint64_t)hash;
+    int64_t i = hash & mask;
+    for (;;) {
+        if (tab[i] == AIL_CS_EMPTY) { tab[i] = idx; return; }
+        if (i + AIL_CS_LINEAR <= mask) {
+            for (int j = 0; j < AIL_CS_LINEAR; j++) {
+                int64_t k = i + 1 + j;
+                if (tab[k] == AIL_CS_EMPTY) { tab[k] = idx; return; }
+            }
+        }
+        perturb >>= AIL_CS_PERTURB;
+        i = (int64_t)(((uint64_t)i * 5 + 1 + perturb) & (uint64_t)mask);
+    }
+}
+static __attribute__((noinline, cold)) void ail_setx_ct_resize(ail_ctx *cx, ail_setobj *so, int64_t minused) {
+    int64_t newsize = 8;
+    while (newsize <= minused) newsize <<= 1;
+    int64_t oldcap = so->cmask + 1, oldmask = so->cmask;
+    int64_t *old = so->ctab;
+    int64_t *ntab = (int64_t *)ail_xmalloc((size_t)newsize * sizeof(int64_t));
+    for (int64_t i = 0; i < newsize; i++) ntab[i] = AIL_CS_EMPTY;
+    int64_t newmask = newsize - 1;
+    int64_t used = so->cu;
+    so->ctab = ntab; so->cmask = newmask; so->cf = used; so->cu = used;
+    for (int64_t i = 0; i <= oldmask; i++) {
+        int64_t e = old[i];
+        if (e >= 0) ail_setx_ct_insert_clean(ntab, newmask, e, so->ent[e].hash);
+    }
+    free(old);
+    ail_setx_account(cx, so, ail_setx_ct_bytes(newsize) - ail_setx_ct_bytes(oldcap));
+}
+/* set_add_entry's placement, with the key already appended at `idx` in `ent`. */
+static inline void ail_setx_ct_add(ail_ctx *cx, ail_setobj *so, int64_t idx) {
+    int64_t mask = so->cmask, hash = so->ent[idx].hash;
+    uint64_t perturb = (uint64_t)hash;
+    int64_t i = hash & mask;
+    int64_t freeslot = -1, unused = -1;
+    for (;;) {
+        int64_t j = i, probes = (i + AIL_CS_LINEAR <= mask) ? AIL_CS_LINEAR : 0;
+        do {
+            int64_t e = so->ctab[j];
+            if (e == AIL_CS_EMPTY) { unused = j; break; }
+            if (e == AIL_CS_DUMMY) freeslot = j;
+            j++;
+        } while (probes--);
+        if (unused >= 0) break;
+        perturb >>= AIL_CS_PERTURB;
+        i = (int64_t)(((uint64_t)i * 5 + 1 + perturb) & (uint64_t)mask);
+    }
+    if (freeslot >= 0) {
+        so->ctab[freeslot] = idx; so->cu++;
+        return;
+    }
+    so->ctab[unused] = idx; so->cf++; so->cu++;
+    if (!((uint64_t)so->cf * 5 < (uint64_t)mask * 3))
+        ail_setx_ct_resize(cx, so, so->cu > 50000 ? so->cu * 2 : so->cu * 4);
+}
+/* the slot of `key`, or -1 */
+static inline int64_t ail_setx_ct_find(const ail_setobj *so, ail_obj key, int64_t hash) {
+    int64_t mask = so->cmask, i = hash & mask;
+    uint64_t perturb = (uint64_t)hash;
+    for (;;) {
+        int64_t j = i, probes = (i + AIL_CS_LINEAR <= mask) ? AIL_CS_LINEAR : 0;
+        do {
+            int64_t e = so->ctab[j];
+            if (e == AIL_CS_EMPTY) return -1;
+            if (e >= 0 && so->ent[e].hash == hash && ail_member_eq(so->ent[e].key, key)) return j;
+            j++;
+        } while (probes--);
+        perturb >>= AIL_CS_PERTURB;
+        i = (int64_t)(((uint64_t)i * 5 + 1 + perturb) & (uint64_t)mask);
+    }
+}
+static inline void ail_setx_ct_discard(ail_setobj *so, ail_obj key, int64_t hash) {
+    int64_t slot = ail_setx_ct_find(so, key, hash);
+    if (slot < 0) return;
+    so->ctab[slot] = AIL_CS_DUMMY; so->cu--;
+}
+
 /* rebuild into `newcap` slots, dropping holes (order kept) */
-static inline void ail_setx_rebuild(ail_ctx *cx, ail_setobj *so, int64_t newcap) {
-    ail_setentry *old = so->ent; int64_t oldn = so->n, oldcap = so->cap;
+static __attribute__((noinline, cold)) void ail_setx_rebuild(ail_ctx *cx, ail_setobj *so, int64_t newcap) {
+    ail_setentry *old = so->ent; int64_t oldn = so->n, oldcap = so->cap, oldfin = so->fin;
+    int hasct = so->co && so->ctab;
+    int64_t *remap = (int64_t *)ail_xmalloc((size_t)(oldn ? oldn : 1) * sizeof(int64_t));
+    for (int64_t i = 0; i < oldn; i++) remap[i] = -1;
     free(so->index);
     ail_setx_alloc(so, newcap);
     int64_t mask = so->index_cap - 1;
@@ -16594,11 +16739,25 @@ static inline void ail_setx_rebuild(ail_ctx *cx, ail_setobj *so, int64_t newcap)
         if (!ail_setx_live(&old[i])) continue;
         int64_t k = so->n++;
         so->ent[k] = old[i];
+        remap[i] = k;
         int64_t slot = (int64_t)((uint64_t)old[i].hash & (uint64_t)mask);
         while (so->index[slot] != -1) slot = (slot + 1) & mask;
         so->index[slot] = k;
     }
     so->used = so->n;
+    if (hasct) {
+        for (int64_t slot = 0; slot <= so->cmask; slot++)
+            if (so->ctab[slot] >= 0) so->ctab[slot] = remap[so->ctab[slot]];
+    }
+    int64_t nf = 0;
+    if (!hasct) {
+        for (int64_t i = 0; i < oldfin && i < oldn; i++) if (remap[i] >= 0) nf++;
+        so->fin = nf;
+    }
+    /* with a CPython table `fin` is a slot cursor, not an entry index: the table itself is only
+       remapped in place, so the cursor keeps its value (CPython's set_table_resize keeps finger). */
+    else so->fin = oldfin;
+    free(remap);
     free(old);
     ail_setx_account(cx, so, ail_setx_bytes(newcap) - ail_setx_bytes(oldcap));
 }
@@ -16614,8 +16773,9 @@ static inline int64_t ail_setx_find(const ail_setobj *so, ail_obj key, int64_t h
 static inline int ail_setx_contains_entry(const ail_setobj *so, ail_obj key, int64_t hash) {
     return ail_setx_find(so, key, hash) >= 0;
 }
-static inline void ail_setx_add_entry(ail_ctx *cx, ail_setobj *so, ail_obj key, int64_t hash) {
-    if (ail_setx_find(so, key, hash) >= 0) return;
+static inline void ail_setx_add_entry(ail_ctx *cx, ail_setobj *so, ail_obj key, int64_t hash);
+/* append a new key to the dense entries and the lookup index, without touching the CPython table */
+static inline int64_t ail_setx_append(ail_ctx *cx, ail_setobj *so, ail_obj key, int64_t hash) {
     if (so->n == so->cap) ail_setx_rebuild(cx, so, so->used * 2 > so->cap ? so->cap * 2 : so->cap);
     int64_t k = so->n++;
     so->ent[k].key = key; so->ent[k].hash = hash;
@@ -16623,11 +16783,19 @@ static inline void ail_setx_add_entry(ail_ctx *cx, ail_setobj *so, ail_obj key, 
     int64_t mask = so->index_cap - 1, slot = (int64_t)((uint64_t)hash & (uint64_t)mask);
     while (so->index[slot] != -1) slot = (slot + 1) & mask;
     so->index[slot] = k;
+    return k;
+}
+static inline void ail_setx_add_entry(ail_ctx *cx, ail_setobj *so, ail_obj key, int64_t hash) {
+    if (ail_setx_find(so, key, hash) >= 0) return;
+    if (so->co && !ail_setx_det(key)) { ail_setx_ct_release(cx, so); so->co = 0; }
+    int64_t k = ail_setx_append(cx, so, key, hash);
+    if (so->co) ail_setx_ct_add(cx, so, k);
 }
 /* 1 when the key was there */
 static inline int ail_setx_discard_entry(ail_setobj *so, ail_obj key, int64_t hash) {
     int64_t e = ail_setx_find(so, key, hash);
     if (e < 0) return 0;
+    if (so->co) ail_setx_ct_discard(so, key, hash);
     memset(&so->ent[e].key, 0, sizeof so->ent[e].key);
     so->used--;
     return 1;
@@ -16635,6 +16803,14 @@ static inline int ail_setx_discard_entry(ail_setobj *so, ail_obj key, int64_t ha
 static inline int ail_setx_next(const ail_setobj *so, int64_t *pos, ail_setentry **entry) {
     int64_t i = *pos;
     if (i < 0) return 0;
+    if (so->co && so->ctab) {
+        while (i <= so->cmask) {
+            int64_t e = so->ctab[i];
+            if (e >= 0) { *entry = &so->ent[e]; *pos = i + 1; return 1; }
+            i++;
+        }
+        *pos = i; return 0;
+    }
     while (i < so->n && !ail_setx_live(&so->ent[i])) i++;
     if (i >= so->n) { *pos = i; return 0; }
     *entry = &so->ent[i];
@@ -16646,12 +16822,21 @@ static inline void ail_setx_clear(ail_ctx *cx, ail_setobj *so) {
     free(so->ent); free(so->index);
     ail_setx_alloc(so, 8);
     ail_setx_account(cx, so, ail_setx_bytes(8) - ail_setx_bytes(oldcap));
+    ail_setx_ct_release(cx, so);
+    so->co = 1;
+    ail_setx_ct_alloc(so);
+    ail_setx_account(cx, so, ail_setx_ct_bytes(8));
 }
 static inline void ail_setx_swap_bodies(ail_setobj *a, ail_setobj *b) {
     ail_setobj t = *a;
     a->ent = b->ent; a->n = b->n; a->cap = b->cap; a->used = b->used; a->index = b->index; a->index_cap = b->index_cap;
     b->ent = t.ent; b->n = t.n; b->cap = t.cap; b->used = t.used; b->index = t.index; b->index_cap = t.index_cap;
     int64_t f = a->fin; a->fin = b->fin; b->fin = f;   /* the pop cursor belongs to the body it indexes */
+    int64_t *ct = a->ctab; a->ctab = b->ctab; b->ctab = ct;
+    int64_t cm = a->cmask; a->cmask = b->cmask; b->cmask = cm;
+    int64_t cff = a->cf; a->cf = b->cf; b->cf = cff;
+    int64_t cuu = a->cu; a->cu = b->cu; b->cu = cuu;
+    int8_t cc = a->co; a->co = b->co; b->co = cc;
     uint32_t sz = a->hdr.size; a->hdr.size = b->hdr.size; b->hdr.size = sz;
 }
 static inline ail_st ail_setx_add_key(ail_ctx *cx, ail_setobj *so, ail_obj key) {
@@ -16685,9 +16870,30 @@ static inline ail_st ail_setx_discard_key(ail_ctx *cx, int *found, ail_setobj *s
     return AIL_OK;
 }
 static inline ail_obj ail_setx_newlike(ail_ctx *cx, ail_obj like) { return ail_setx_new(cx, like.tag == AIL_T_FROZENSET); }
-/* add every element of `other` (a set/frozenset), in its order */
-static inline void ail_setx_merge(ail_ctx *cx, ail_setobj *so, const ail_setobj *other) {
-    if (other == so) return;
+/* set_merge: add every element of `other` (a set/frozenset) in CPython's own table order. */
+static __attribute__((noinline, cold)) void ail_setx_merge(ail_ctx *cx, ail_setobj *so, const ail_setobj *other) {
+    if (other == so || other->used == 0) return;
+    if (so->co && !other->co) { ail_setx_ct_release(cx, so); so->co = 0; }
+    if (so->co && other->co) {
+        if ((so->cf + other->used) * 5 >= so->cmask * 3)
+            ail_setx_ct_resize(cx, so, (so->cu + other->used) * 2);
+        if (so->cf == 0 && so->cmask == other->cmask && other->cf == other->cu) {
+            /* set_merge's pointer copy: identical table sizes and no dummies to purge, so the
+               source's layout is copied slot for slot (observable when two keys share a hash). */
+            for (int64_t s = 0; s <= other->cmask; s++) {
+                int64_t e = other->ctab[s];
+                if (e < 0) continue;
+                so->ctab[s] = ail_setx_append(cx, so, other->ent[e].key, other->ent[e].hash);
+                so->cf++; so->cu++;
+            }
+            return;
+        }
+        for (int64_t s = 0; s <= other->cmask; s++) {
+            int64_t e = other->ctab[s];
+            if (e >= 0) ail_setx_add_entry(cx, so, other->ent[e].key, other->ent[e].hash);
+        }
+        return;
+    }
     int64_t pos = 0; ail_setentry *e;
     while (ail_setx_next(other, &pos, &e)) ail_setx_add_entry(cx, so, e->key, e->hash);
 }
@@ -16696,24 +16902,55 @@ static inline ail_obj ail_setx_copy_as(ail_ctx *cx, int frozen, const ail_setobj
     ail_setx_merge(cx, AIL_SETOBJ(r), src);
     return r;
 }
-/* a's elements that are (keep 1) / are not (keep 0) in b, in a's order */
-static inline void ail_setx_filter(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo, int keep) {
+/* PyFrozenSet_New(list(src)): a fresh set built by adding src's elements in src's table order.
+   CPython's compiler rebuilds every folded frozenset constant this way (merge_consts_recursive),
+   which is observable when two keys share a hash. */
+static inline ail_st ail_set_rebuild_from(ail_ctx *cx, ail_obj dst, ail_obj src) {
+    int64_t pos = 0; ail_setentry *e;
+    while (ail_setx_next(AIL_SETOBJ(src), &pos, &e)) {
+        ail_st st = ail_setx_add_key(cx, AIL_SETOBJ(dst), e->key);
+        if (st != AIL_OK) return st;
+    }
+    return AIL_OK;
+}
+/* a's elements that are (keep 1) / are not (keep 0) in b, in CPython's order */
+static inline void ail_setx_difference_update_set(ail_ctx *cx, ail_setobj *so, ail_obj otheri);
+static __attribute__((noinline, cold)) void ail_setx_filter(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo, int keep) {
     ail_obj r = ail_setx_newlike(cx, ao);
     ail_setobj *a = AIL_SETOBJ(ao), *b = AIL_SETOBJ(bo);
+    ail_setobj *iter = a, *test = b;
+    if (keep && b->used < a->used) { iter = b; test = a; }   /* CPython intersects the smaller into the larger */
     int64_t pos = 0; ail_setentry *e;
-    while (ail_setx_next(a, &pos, &e))
-        if (ail_setx_contains_entry(b, e->key, e->hash) == keep) ail_setx_add_entry(cx, AIL_SETOBJ(r), e->key, e->hash);
+    while (ail_setx_next(iter, &pos, &e)) {
+        int has = ail_setx_contains_entry(test, e->key, e->hash);
+        if ((keep && has) || (!keep && !has)) ail_setx_add_entry(cx, AIL_SETOBJ(r), e->key, e->hash);
+    }
     *out = r;
 }
 static inline void ail_setx_intersection(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) { ail_setx_filter(cx, out, ao, bo, 1); }
-static inline void ail_setx_difference(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) { ail_setx_filter(cx, out, ao, bo, 0); }
-static inline void ail_setx_symmetric_difference(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) {
-    ail_obj r; ail_setx_filter(cx, &r, ao, bo, 0);
-    AIL_ROOT1(cx, fr, r);
+static inline __attribute__((noinline)) void ail_setx_difference(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) {
+    /* set_difference: when len(a)>>2 > len(b), CPython copies a and deletes b's elements, which
+       keeps a's table layout (and its finger); otherwise it filters into a fresh set. */
     ail_setobj *a = AIL_SETOBJ(ao), *b = AIL_SETOBJ(bo);
+    if ((a->used >> 2) > b->used) {
+        ail_obj r = ail_setx_copy_as(cx, ao.tag == AIL_T_FROZENSET, a);
+        AIL_ROOT1(cx, fr, r);
+        ail_setx_difference_update_set(cx, AIL_SETOBJ(r), bo);
+        AIL_FRAME_LEAVE(cx, fr);
+        *out = r;
+        return;
+    }
+    ail_setx_filter(cx, out, ao, bo, 0);
+}
+static inline void ail_setx_symmetric_difference(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) {
+    /* CPython: copy b, then discard/add each element of a in its table order */
+    ail_obj r = ail_setx_copy_as(cx, ao.tag == AIL_T_FROZENSET, AIL_SETOBJ(bo));
+    AIL_ROOT1(cx, fr, r);
     int64_t pos = 0; ail_setentry *e;
-    while (ail_setx_next(b, &pos, &e))
-        if (!ail_setx_contains_entry(a, e->key, e->hash)) ail_setx_add_entry(cx, AIL_SETOBJ(r), e->key, e->hash);
+    while (ail_setx_next(AIL_SETOBJ(ao), &pos, &e)) {
+        if (ail_setx_discard_entry(AIL_SETOBJ(r), e->key, e->hash)) continue;
+        ail_setx_add_entry(cx, AIL_SETOBJ(r), e->key, e->hash);
+    }
     AIL_FRAME_LEAVE(cx, fr);
     *out = r;
 }
@@ -16722,10 +16959,20 @@ static inline void ail_setx_difference_update_set(ail_ctx *cx, ail_setobj *so, a
     if (other == so) { ail_setx_clear(cx, so); return; }
     int64_t pos = 0; ail_setentry *e;
     while (ail_setx_next(other, &pos, &e)) ail_setx_discard_entry(so, e->key, e->hash);
+    if (so->co && (so->cf - so->cu) > so->cmask / 4)
+        ail_setx_ct_resize(cx, so, so->cu > 50000 ? so->cu * 2 : so->cu * 4);
 }
 static inline void ail_setx_symmetric_difference_update_set(ail_ctx *cx, ail_setobj *so, ail_obj soo, ail_obj otheri) {
-    ail_obj tmp; ail_setx_symmetric_difference(cx, &tmp, soo, otheri);
-    ail_setx_swap_bodies(so, AIL_SETOBJ(tmp));
+    /* set_symmetric_difference_update: mutate `so` in place, walking `other`'s own table order and
+       adding/discarding each key there (there is no `a ^ b` copy). */
+    (void)soo;
+    ail_setobj *other = AIL_SETOBJ(otheri);
+    if (other == so) { ail_setx_clear(cx, so); return; }
+    int64_t pos = 0; ail_setentry *e;
+    while (ail_setx_next(other, &pos, &e)) {
+        if (ail_setx_discard_entry(so, e->key, e->hash)) continue;
+        ail_setx_add_entry(cx, so, e->key, e->hash);
+    }
 }
 static inline int ail_setx_issubset_set(const ail_setobj *a, const ail_setobj *b) {
     if (a->used > b->used) return 0;
@@ -20836,29 +21083,44 @@ static inline ail_st ail_meth_set_remove(ail_ctx *cx, ail_obj s, ail_obj x) {
 }
 static inline ail_st ail_meth_set_pop(ail_ctx *cx, ail_obj *out, ail_obj s) {
     ail_st st = ail_setm_need_mut(cx, s, "pop"); if (st != AIL_OK) return st;
-    /* An EMPTY set's pop shows no order: CPython raises KeyError('pop from an empty set'), so
-       answer that (the order-free case), exactly as CPython does. */
-    if (AIL_SETOBJ(s)->used == 0) {
+    ail_setobj *so = AIL_SETOBJ(s);
+    if (so->used == 0) {
         ail_obj msg = ail_str_from_cstr(cx, "pop from an empty set");
         return ail_raise_key_arg(cx, msg);
     }
-    /* A set of ONE element has only one possible order: pop returns that element, as CPython. */
-    if (AIL_SETOBJ(s)->used == 1) {
-        int64_t pos = 0;
-        ail_setentry *e;
-        if (ail_setx_next(AIL_SETOBJ(s), &pos, &e)) {
-            *out = e->key;
-            ail_setx_discard_entry(AIL_SETOBJ(s), e->key, e->hash);
-            return AIL_OK;
+    if (so->co && so->ctab) {
+        /* set_pop: the search finger (kept in `fin`) walks the table and returns the first live slot,
+           wrapping at the end; the slot becomes a dummy. */
+        int64_t mask = so->cmask, i = so->fin & mask;
+        for (int64_t seen = 0; seen <= mask; seen++) {
+            int64_t e = so->ctab[i];
+            if (e >= 0) {
+                ail_obj key = so->ent[e].key;
+                so->ctab[i] = AIL_CS_DUMMY;
+                so->cu--;
+                so->used--;
+                memset(&so->ent[e].key, 0, sizeof so->ent[e].key);
+                so->fin = i + 1;
+                *out = key;
+                return AIL_OK;
+            }
+            i = (i + 1) & mask;
         }
+        ail_obj msg = ail_str_from_cstr(cx, "pop from an empty set");
+        return ail_raise_key_arg(cx, msg);
     }
-    /* pop returns the FIRST element in iteration order, so its answer shows the order. CPython's
-       order is its hash table's (per-run random for a set of str), which AIL does not reproduce:
-       refuse rather than return a different element (the typed path refuses this at compile time). */
-    (void)out;
-    return ail_raise_c(cx, AIL_B_TYPEERROR,
-        "set.pop() returns the first element in iteration order, where CPython walks its hash table "
-        "and a set of str in a per-run random order; write `sorted(s)[0]` (then `s.discard(...)`)");
+    int64_t k = so->fin;                      /* insertion order: the first live entry */
+    while (k < so->n && !ail_setx_live(&so->ent[k])) k++;
+    if (k >= so->n) {
+        ail_obj msg = ail_str_from_cstr(cx, "pop from an empty set");
+        return ail_raise_key_arg(cx, msg);
+    }
+    so->fin = k + 1;
+    ail_obj key = so->ent[k].key;
+    memset(&so->ent[k].key, 0, sizeof so->ent[k].key);
+    so->used--;
+    *out = key;
+    return AIL_OK;
 }
 static inline ail_st ail_meth_set_clear(ail_ctx *cx, ail_obj s) {
     ail_st st = ail_setm_need_mut(cx, s, "clear"); if (st != AIL_OK) return st;
@@ -21029,6 +21291,22 @@ static inline ail_st ail_meth_set_symmetric_difference_update(ail_ctx *cx, ail_o
     ail_st st = ail_setm_need_mut(cx, a, "symmetric_difference_update"); if (st != AIL_OK) return st;
     ail_setobj *so = AIL_SETOBJ(a);
     if (AIL_IS_ANYSET(other.tag)) { ail_setx_symmetric_difference_update_set(cx, so, a, other); return AIL_OK; }
+    if (other.tag == AIL_T_DICT) {
+        /* CPython's dict fast path toggles each key in the dict's insertion order */
+        AIL_FRAME_ENTER(cx, fr, 1);
+        st = ail_iter(cx, &fr.slots[0], other);
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+        for (;;) {
+            ail_obj x; st = ail_it_next(cx, &x, fr.slots[0]);
+            if (st == AIL_STOP) { st = AIL_OK; break; }
+            if (st != AIL_OK) break;
+            int found; st = ail_setx_discard_key(cx, &found, so, x);
+            if (st != AIL_OK) break;
+            if (!found) { st = ail_setx_add_key(cx, so, x); if (st != AIL_OK) break; }
+        }
+        AIL_FRAME_LEAVE(cx, fr);
+        return st;
+    }
     ail_obj tmp = ail_set_new(cx);
     AIL_FRAME_ENTER(cx, fr, 1); fr.slots[0] = tmp;
     st = ail_setx_update_any(cx, AIL_SETOBJ(tmp), other);
@@ -25863,7 +26141,10 @@ REQUIRES['BMAP'] = ['STAB', 'BYTES', 'SLIST', 'BLIST', 'DIE']
 # add/discard/remove and the four set operators. Iteration order is insertion order, as for every
 # AIL dict and set.
 IDICT = r'''
-typedef struct { ail_tab table; uint64_t epoch; } ail_idict;
+/* `ckey`/`ckind`/`cmask`/`cf`/`cu`/`cfin`/`con`: set[int]'s exact CPython table (see ISET), unused by
+   the dict kinds (con stays 0 there). ckind is 0 empty, 1 live, 2 dummy; slots hold keys. */
+typedef struct { ail_tab table; uint64_t epoch;
+                 int64_t *ckey; unsigned char *ckind; int64_t cmask, cf, cu, cfin; int8_t con; } ail_idict;
 static inline __attribute__((always_inline)) void ail_idict_check(const ail_idict *T) {
     if (!T || T->table.n < 0) ail_die("invalid int dictionary");
 }
@@ -25879,12 +26160,23 @@ static ail_idict ail_idict_copy(const ail_idict *source) {
     ail_idict_check(source);
     ail_idict result = {0};
     ail_tab_copy(&result.table, &source->table);
+    if (source->con) {
+        int64_t cap = source->cmask + 1;
+        result.con = source->con; result.cmask = source->cmask;
+        result.cf = source->cf; result.cu = source->cu; result.cfin = source->cfin;
+        result.ckey = (int64_t *)malloc((size_t)cap * sizeof(int64_t));
+        result.ckind = (unsigned char *)malloc((size_t)cap);
+        if (!result.ckey || !result.ckind) ail_die("out of memory");
+        memcpy(result.ckey, source->ckey, (size_t)cap * sizeof(int64_t));
+        memcpy(result.ckind, source->ckind, (size_t)cap);
+    }
     return result;
 }
 static void ail_idict_free(ail_idict *T) {
     ail_idict_check(T);
     ail_tab_free(&T->table);
-    T->epoch = 0;
+    free(T->ckey); free(T->ckind);
+    T->epoch = 0; T->ckey = 0; T->ckind = 0; T->con = 0;
 }
 static void ail_idict_replace(ail_idict *destination, ail_idict owned) {
     ail_idict_check(destination);
@@ -25892,6 +26184,7 @@ static void ail_idict_replace(ail_idict *destination, ail_idict owned) {
     uint64_t epoch = ail_idict_next_epoch(destination);
     if (owned.table.order && owned.table.order == destination->table.order) owned = ail_idict_copy(&owned);
     ail_tab_free(&destination->table);
+    free(destination->ckey); free(destination->ckind);
     *destination = owned;
     destination->epoch = epoch;
 }
@@ -25931,6 +26224,13 @@ static void ail_idict_clear(ail_idict *T) {
     uint64_t epoch = T->table.n ? ail_idict_next_epoch(T) : T->epoch;
     ail_tab_clear(&T->table);
     T->epoch = epoch;
+    if (T->con) {   /* an emptied set is back to CPython's minimum table */
+        free(T->ckey); free(T->ckind);
+        T->cmask = 7; T->cf = T->cu = 0; T->cfin = 0;
+        T->ckey = (int64_t *)malloc((size_t)8 * sizeof(int64_t));
+        T->ckind = (unsigned char *)calloc((size_t)8, 1);
+        if (!T->ckey || !T->ckind) ail_die("out of memory");
+    }
 }
 static int64_t ail_idict_pop(ail_idict *T, int64_t key) {
     ail_idict_check(T);
@@ -25964,7 +26264,17 @@ static void ail_idict_update(ail_idict *T, const ail_idict *source) {
 static ail_list ail_idict_keys_snapshot(const ail_idict *T) {
     ail_idict_check(T);
     ail_list result = {0};
-    if (T->table.n) {
+    if (!T->table.n) return result;
+    if (T->con) {   /* CPython's table order for set[int] */
+        ail__need_elems(T->cu, AIL_ELEM_LIMIT(int64_t));
+        result.p = (int64_t *)ail_alloc((size_t)T->cu * sizeof *result.p);
+        result.n = result.cap = T->cu;
+        int64_t k = 0;
+        for (int64_t s = 0; s <= T->cmask; s++)
+            if (T->ckind[s] == 1) result.p[k++] = T->ckey[s];
+        return result;
+    }
+    {
         const int64_t *order = ail_tab_order(&T->table);
         ail__need_elems(T->table.n, AIL_ELEM_LIMIT(int64_t));
         result.p = (int64_t *)ail_alloc((size_t)T->table.n * sizeof *result.p);
@@ -26053,7 +26363,10 @@ static ail_flist ail_ifdict_values_snapshot(const ail_ifdict *T) {
 # how a value is checked, owned, copied out to the caller's arena and snapshotted.
 _IVMAP = r'''
 typedef struct { ail_tab table; @V *values; int64_t values_n, values_cap;
-                 int64_t *spare; int64_t spare_n, spare_cap; uint64_t epoch; } ail_@M;
+                 int64_t *spare; int64_t spare_n, spare_cap; uint64_t epoch;
+                 /* set[int]'s CPython-layout table (see ISET): slots hold keys, ckind is 0 empty,
+                    1 live, 2 dummy; `con` is 0 for every other user of this struct. */
+                 int64_t *ckey; unsigned char *ckind; int64_t cmask, cf, cu, cfin; int8_t con; } ail_@M;
 static void ail_@M_check(const ail_@M *T) {
     if (!T || T->table.n < 0 || T->values_n < 0 || T->values_n > T->values_cap || T->spare_n < 0
         || T->spare_n > T->spare_cap || (T->values_cap && !T->values) || (T->spare_cap && !T->spare)
@@ -26164,11 +26477,19 @@ static void ail_@M_clear(ail_@M *T) {
     T->values_n = T->spare_n = 0;
     ail_tab_clear(&T->table);
     T->epoch = epoch;
+    if (T->con) {   /* a cleared set is empty and back to CPython's minimum table */
+        free(T->ckey); free(T->ckind);
+        T->cmask = 7; T->cf = T->cu = 0; T->cfin = 0;
+        T->ckey = (int64_t *)malloc((size_t)8 * sizeof(int64_t));
+        T->ckind = (unsigned char *)calloc((size_t)8, 1);
+        if (!T->ckey || !T->ckind) ail_die("out of memory");
+    }
 }
 static void ail_@M_free(ail_@M *T) {
     ail_@M_check(T);
     for (int64_t j = 0; j < T->values_n; j++) free((void *)T->values[j].p);
     free(T->values); free(T->spare);
+    free(T->ckey); free(T->ckind);
     ail_tab_free(&T->table);
     *T = (ail_@M){0};
 }
@@ -26179,6 +26500,16 @@ static ail_@M ail_@M_copy(const ail_@M *source) {
     for (int64_t j = 0; j < source->table.n; j++)
         ail_@M_put(&result, order[j], source->values[ail_@M_slot(source, order[j])]);
     result.epoch = 0;
+    if (source->con) {   /* the shadow is keyed by value, so it copies independently of the storage */
+        int64_t cap = source->cmask + 1;
+        result.con = source->con; result.cmask = source->cmask;
+        result.cf = source->cf; result.cu = source->cu; result.cfin = source->cfin;
+        result.ckey = (int64_t *)malloc((size_t)cap * sizeof(int64_t));
+        result.ckind = (unsigned char *)malloc((size_t)cap);
+        if (!result.ckey || !result.ckind) ail_die("out of memory");
+        memcpy(result.ckey, source->ckey, (size_t)cap * sizeof(int64_t));
+        memcpy(result.ckind, source->ckind, (size_t)cap);
+    }
     return result;
 }
 static void ail_@M_replace(ail_@M *destination, ail_@M owned) {
@@ -26207,13 +26538,21 @@ static void ail_@M_update(ail_@M *T, const ail_@M *source) {
 static ail_list ail_@M_keys_snapshot(const ail_@M *T) {
     ail_@M_check(T);
     ail_list result = {0};
-    if (T->table.n) {
-        const int64_t *order = ail_tab_order(&T->table);
-        ail__need_elems(T->table.n, AIL_ELEM_LIMIT(int64_t));
-        result.p = (int64_t *)ail_alloc((size_t)T->table.n * sizeof *result.p);
-        result.n = result.cap = T->table.n;
-        memcpy(result.p, order, (size_t)T->table.n * sizeof *result.p);
+    if (!T->table.n) return result;
+    if (T->con) {   /* CPython's table order for a set[int] */
+        ail__need_elems(T->cu, AIL_ELEM_LIMIT(int64_t));
+        result.p = (int64_t *)ail_alloc((size_t)T->cu * sizeof *result.p);
+        result.n = result.cap = T->cu;
+        int64_t k = 0;
+        for (int64_t s = 0; s <= T->cmask; s++)
+            if (T->ckind[s] == 1) result.p[k++] = T->ckey[s];
+        return result;
     }
+    const int64_t *order = ail_tab_order(&T->table);
+    ail__need_elems(T->table.n, AIL_ELEM_LIMIT(int64_t));
+    result.p = (int64_t *)ail_alloc((size_t)T->table.n * sizeof *result.p);
+    result.n = result.cap = T->table.n;
+    memcpy(result.p, order, (size_t)T->table.n * sizeof *result.p);
     return result;
 }
 static uint64_t ail_@M_epoch(const ail_@M *T) { ail_@M_check(T); return T->epoch; }
@@ -26265,9 +26604,10 @@ static ail_blist *ail_ibmap_values_snapshot(const ail_ibmap *T) {
 }
 '''
 
-# set[int] and set[str]: a dict whose values are all 0. The operators keep AIL's set order: `a & b`
-# and `a - b` keep a's order, `a | b` is a's keys then b's new ones, `a ^ b` is a's keys not in b
-# then b's keys not in a -- exactly what the same operators give unannotated sets.
+# set[int] and set[str]: a dict whose values are all 0. set[int] also carries CPython's exact
+# table layout (the same size, probing and dummies as the boxed set), so iteration and pop()
+# match CPython's order; set[str] keeps insertion order, one valid CPython run because CPython's
+# order for str is random per run.
 ISET = r'''
 typedef ail_idict ail_iset;
 #define ail_iset_check ail_idict_check
@@ -26280,33 +26620,282 @@ typedef ail_idict ail_iset;
 #define ail_iset_len ail_idict_len
 #define ail_iset_has ail_idict_has
 #define ail_iset_clear ail_idict_clear
-#define ail_iset_update ail_idict_update
 #define ail_iset_keys_snapshot ail_idict_keys_snapshot
 #define ail_iset_epoch ail_idict_epoch
-static void ail_iset_add(ail_iset *T, int64_t key) { ail_idict_put(T, key, 0); }
-static void ail_iset_remove(ail_iset *T, int64_t key) { (void)ail_idict_pop(T, key); }
+#define AIL_IS_EMPTY 0
+#define AIL_IS_LIVE 1
+#define AIL_IS_DUMMY 2
+#define AIL_IS_LINEAR 9
+#define AIL_IS_PERTURB 5
+/* CPython's hash(int): the magnitude mod 2**61-1, signed, with -1 mapped to -2. */
+static inline int64_t ail_iset_hash(int64_t v) {
+    uint64_t u = v < 0 ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;
+    int64_t h = (int64_t)(u % ((((uint64_t)1) << 61) - 1));
+    if (v < 0) h = -h;
+    return h == -1 ? -2 : h;
+}
+static void ail_iset_cp_alloc(ail_iset *T) {
+    T->cmask = 7; T->cf = T->cu = 0; T->cfin = 0;
+    T->ckey = (int64_t *)malloc((size_t)8 * sizeof(int64_t));
+    T->ckind = (unsigned char *)calloc((size_t)8, 1);
+    if (!T->ckey || !T->ckind) ail_die("out of memory");
+}
+static void ail_iset_cp_insert_clean(ail_iset *T, int64_t key, int64_t hash) {
+    int64_t mask = T->cmask, i = hash & mask;
+    uint64_t perturb = (uint64_t)hash;
+    for (;;) {
+        if (T->ckind[i] == AIL_IS_EMPTY) goto place;
+        if (i + AIL_IS_LINEAR <= mask) {
+            for (int j = 0; j < AIL_IS_LINEAR; j++) { int64_t k = i + 1 + j; if (T->ckind[k] == AIL_IS_EMPTY) { i = k; goto place; } }
+        }
+        perturb >>= AIL_IS_PERTURB;
+        i = (int64_t)(((uint64_t)i * 5 + 1 + perturb) & (uint64_t)mask);
+    }
+  place:
+    T->ckind[i] = AIL_IS_LIVE; T->ckey[i] = key;
+}
+static void ail_iset_cp_resize(ail_iset *T, int64_t minused) {
+    int64_t newsize = 8;
+    while (newsize <= minused) newsize <<= 1;
+    int64_t oldcap = T->cmask + 1, oldmask = T->cmask, used = T->cu;
+    int64_t *oldkey = T->ckey; unsigned char *oldkind = T->ckind;
+    T->ckey = (int64_t *)malloc((size_t)newsize * sizeof(int64_t));
+    T->ckind = (unsigned char *)calloc((size_t)newsize, 1);
+    if (!T->ckey || !T->ckind) ail_die("out of memory");
+    T->cmask = newsize - 1; T->cf = used; T->cu = used;
+    for (int64_t i = 0; i <= oldmask; i++)
+        if (oldkind[i] == AIL_IS_LIVE) ail_iset_cp_insert_clean(T, oldkey[i], ail_iset_hash(oldkey[i]));
+    free(oldkey); free(oldkind);
+}
+static int64_t ail_iset_cp_find(const ail_iset *T, int64_t key) {
+    int64_t hash = ail_iset_hash(key), mask = T->cmask, i = hash & mask;
+    uint64_t perturb = (uint64_t)hash;
+    for (;;) {
+        int64_t j = i, probes = (i + AIL_IS_LINEAR <= mask) ? AIL_IS_LINEAR : 0;
+        do {
+            if (T->ckind[j] == AIL_IS_EMPTY) return -1;
+            if (T->ckind[j] == AIL_IS_LIVE && T->ckey[j] == key) return j;
+            j++;
+        } while (probes--);
+        perturb >>= AIL_IS_PERTURB;
+        i = (int64_t)(((uint64_t)i * 5 + 1 + perturb) & (uint64_t)mask);
+    }
+}
+static void ail_iset_cp_add(ail_iset *T, int64_t key) {
+    if (ail_iset_cp_find(T, key) >= 0) return;
+    int64_t hash = ail_iset_hash(key), mask = T->cmask, i = hash & mask;
+    uint64_t perturb = (uint64_t)hash;
+    int64_t freeslot = -1, unused = -1;
+    for (;;) {
+        int64_t j = i, probes = (i + AIL_IS_LINEAR <= mask) ? AIL_IS_LINEAR : 0;
+        do {
+            unsigned char kind = T->ckind[j];
+            if (kind == AIL_IS_EMPTY) { unused = j; break; }
+            if (kind == AIL_IS_DUMMY) freeslot = j;
+            j++;
+        } while (probes--);
+        if (unused >= 0) break;
+        perturb >>= AIL_IS_PERTURB;
+        i = (int64_t)(((uint64_t)i * 5 + 1 + perturb) & (uint64_t)mask);
+    }
+    if (freeslot >= 0) {
+        T->ckind[freeslot] = AIL_IS_LIVE; T->ckey[freeslot] = key; T->cu++;
+        return;
+    }
+    T->ckind[unused] = AIL_IS_LIVE; T->ckey[unused] = key; T->cf++; T->cu++;
+    if (!((uint64_t)T->cf * 5 < (uint64_t)mask * 3))
+        ail_iset_cp_resize(T, T->cu > 50000 ? T->cu * 2 : T->cu * 4);
+}
+static void ail_iset_cp_discard(ail_iset *T, int64_t key) {
+    int64_t slot = ail_iset_cp_find(T, key);
+    if (slot < 0) return;
+    T->ckind[slot] = AIL_IS_DUMMY; T->cu--;
+}
+static void ail_iset_arm(ail_iset *T) {
+    if (T->con) return;
+    T->con = 1;
+    ail_iset_cp_alloc(T);
+    if (T->table.n) {
+        const int64_t *order = ail_tab_order(&T->table);
+        for (int64_t j = 0; j < T->table.n; j++) ail_iset_cp_add(T, order[j]);
+    }
+}
+static void ail_iset_add(ail_iset *T, int64_t key) {
+    ail_iset_check(T);
+    ail_iset_arm(T);
+    if (!ail_tab_has(&T->table, key)) ail_iset_cp_add(T, key);
+    ail_idict_put(T, key, 0);
+}
+static void ail_iset_remove(ail_iset *T, int64_t key) {
+    ail_iset_check(T);
+    ail_iset_arm(T);
+    if (ail_tab_has(&T->table, key)) ail_iset_cp_discard(T, key);
+    (void)ail_idict_pop(T, key);
+}
 static void ail_iset_discard(ail_iset *T, int64_t key) {
     ail_iset_check(T);
-    if (ail_tab_has(&T->table, key)) (void)ail_idict_pop(T, key);
+    ail_iset_arm(T);
+    if (ail_tab_has(&T->table, key)) { ail_iset_cp_discard(T, key); (void)ail_idict_pop(T, key); }
 }
-/* keep: 1 keeps a's keys that are in b, 0 those that are not; b_too adds b's keys not in a. */
-static ail_iset ail_iset_combine(const ail_iset *a, const ail_iset *b, int keep, int b_too) {
-    ail_iset_check(a); ail_iset_check(b);
-    ail_iset result = {0};
-    const int64_t *order = ail_tab_order(&a->table);
-    for (int64_t j = 0; j < a->table.n; j++)
-        if (keep < 0 || ail_tab_has(&b->table, order[j]) == keep) ail_tab_put_slow(&result.table, order[j], 0);
-    if (b_too) {
-        order = ail_tab_order(&b->table);
-        for (int64_t j = 0; j < b->table.n; j++)
-            if (keep < 0 || !ail_tab_has(&a->table, order[j])) ail_tab_put_slow(&result.table, order[j], 0);
+static void ail_iset_update(ail_iset *T, const ail_iset *source) {
+    ail_iset_check(T); ail_iset_check(source);
+    if (source == T) return;
+    ail_iset_arm(T);
+    if (source->con) {
+        for (int64_t s = 0; s <= source->cmask; s++) {
+            int64_t key = source->ckey[s];
+            if (source->ckind[s] != AIL_IS_LIVE) continue;
+            if (!ail_tab_has(&T->table, key)) ail_iset_cp_add(T, key);
+            ail_idict_put(T, key, 0);
+        }
+        return;
     }
-    return result;
+    const int64_t *order = ail_tab_order(&source->table);
+    for (int64_t j = 0; j < source->table.n; j++) {
+        int64_t key = order[j];
+        if (!ail_tab_has(&T->table, key)) ail_iset_cp_add(T, key);
+        ail_idict_put(T, key, 0);
+    }
 }
-static ail_iset ail_iset_or(const ail_iset *a, const ail_iset *b) { return ail_iset_combine(a, b, -1, 1); }
-static ail_iset ail_iset_and(const ail_iset *a, const ail_iset *b) { return ail_iset_combine(a, b, 1, 0); }
-static ail_iset ail_iset_minus(const ail_iset *a, const ail_iset *b) { return ail_iset_combine(a, b, 0, 0); }
-static ail_iset ail_iset_xor(const ail_iset *a, const ail_iset *b) { return ail_iset_combine(a, b, 0, 1); }
+/* PyFrozenSet_New(list(src)) for a set[int]: add src's keys in its table order into `dst`. */
+static void ail_iset_rebuild(ail_iset *dst, const ail_iset *src) {
+    ail_iset_check(dst); ail_iset_check(src);
+    ail_iset_arm(dst);
+    if (src->con) {
+        for (int64_t s = 0; s <= src->cmask; s++)
+            if (src->ckind[s] == AIL_IS_LIVE) ail_iset_add(dst, src->ckey[s]);
+    } else {
+        const int64_t *order = ail_tab_order(&src->table);
+        for (int64_t j = 0; j < src->table.n; j++) ail_iset_add(dst, order[j]);
+    }
+}
+/* CPython's set_merge for a set[int]: pre-size, then insert the source's live keys in its table order. */
+static void ail_iset_merge(ail_iset *T, const ail_iset *source) {
+    ail_iset_check(T); ail_iset_check(source);
+    if (source == T || source->table.n == 0) return;
+    ail_iset_arm(T);
+    if (!source->con) {
+        const int64_t *order = ail_tab_order(&source->table);
+        for (int64_t j = 0; j < source->table.n; j++) ail_iset_add(T, order[j]);
+        return;
+    }
+    if ((T->cf + source->cu) * 5 >= T->cmask * 3)
+        ail_iset_cp_resize(T, (T->cu + source->cu) * 2);
+    if (T->cf == 0 && T->cmask == source->cmask && source->cf == source->cu) {
+        /* set_merge's pointer copy (see the boxed set): copy the layout exactly */
+        for (int64_t s = 0; s <= source->cmask; s++)
+            if (source->ckind[s] == AIL_IS_LIVE && !ail_tab_has(&T->table, source->ckey[s]))
+                ail_idict_put(T, source->ckey[s], 0);
+        memcpy(T->ckey, source->ckey, (size_t)(source->cmask + 1) * sizeof(int64_t));
+        memcpy(T->ckind, source->ckind, (size_t)(source->cmask + 1));
+        T->cf = T->cu = source->cu;
+        return;
+    }
+    for (int64_t s = 0; s <= source->cmask; s++) {
+        if (source->ckind[s] != AIL_IS_LIVE) continue;
+        int64_t key = source->ckey[s];
+        if (!ail_tab_has(&T->table, key)) ail_iset_cp_add(T, key);
+        ail_idict_put(T, key, 0);
+    }
+}
+/* CPython's a & b: iterate the smaller set in table order, keep what the larger has. */
+static ail_iset ail_iset_and(const ail_iset *a, const ail_iset *b) {
+    ail_iset_check(a); ail_iset_check(b);
+    ail_iset r = {0};
+    ail_iset_arm(&r);
+    const ail_iset *iter = a, *test = b;
+    if (b->table.n < a->table.n) { iter = b; test = a; }
+    if (iter->con) {
+        for (int64_t s = 0; s <= iter->cmask; s++)
+            if (iter->ckind[s] == AIL_IS_LIVE && ail_tab_has(&test->table, iter->ckey[s]))
+                ail_iset_add(&r, iter->ckey[s]);
+    } else {
+        const int64_t *order = ail_tab_order(&iter->table);
+        for (int64_t j = 0; j < iter->table.n; j++)
+            if (ail_tab_has(&test->table, order[j])) ail_iset_add(&r, order[j]);
+    }
+    return r;
+}
+static ail_iset ail_iset_minus(const ail_iset *a, const ail_iset *b) {
+    ail_iset_check(a); ail_iset_check(b);
+    /* set_difference: len(a)>>2 > len(b) copies a, then deletes b's keys (keeping a's layout). */
+    if ((a->table.n >> 2) > b->table.n) {
+        ail_iset r = {0};
+        ail_iset_merge(&r, a);
+        if (b->con) {
+            for (int64_t s = 0; s <= b->cmask; s++)
+                if (b->ckind[s] == AIL_IS_LIVE) ail_iset_discard(&r, b->ckey[s]);
+        } else {
+            const int64_t *order = ail_tab_order(&b->table);
+            for (int64_t j = 0; j < b->table.n; j++) ail_iset_discard(&r, order[j]);
+        }
+        if (r.con && (r.cf - r.cu) > r.cmask / 4)
+            ail_iset_cp_resize(&r, r.cu > 50000 ? r.cu * 2 : r.cu * 4);
+        return r;
+    }
+    ail_iset r = {0};
+    ail_iset_arm(&r);
+    if (a->con) {
+        for (int64_t s = 0; s <= a->cmask; s++)
+            if (a->ckind[s] == AIL_IS_LIVE && !ail_tab_has(&b->table, a->ckey[s]))
+                ail_iset_add(&r, a->ckey[s]);
+    } else {
+        const int64_t *order = ail_tab_order(&a->table);
+        for (int64_t j = 0; j < a->table.n; j++)
+            if (!ail_tab_has(&b->table, order[j])) ail_iset_add(&r, order[j]);
+    }
+    return r;
+}
+static ail_iset ail_iset_or(const ail_iset *a, const ail_iset *b) {
+    ail_iset_check(a); ail_iset_check(b);
+    ail_iset r = ail_idict_copy(a);
+    ail_iset_update(&r, b);
+    return r;
+}
+static ail_iset ail_iset_xor(const ail_iset *a, const ail_iset *b) {
+    ail_iset_check(a); ail_iset_check(b);
+    ail_iset r = ail_idict_copy(b);
+    ail_iset_arm(&r);
+    if (a->con) {
+        for (int64_t s = 0; s <= a->cmask; s++) {
+            if (a->ckind[s] != AIL_IS_LIVE) continue;
+            int64_t key = a->ckey[s];
+            if (ail_tab_has(&r.table, key)) ail_iset_discard(&r, key);
+            else ail_iset_add(&r, key);
+        }
+    } else {
+        const int64_t *order = ail_tab_order(&a->table);
+        for (int64_t j = 0; j < a->table.n; j++) {
+            int64_t key = order[j];
+            if (ail_tab_has(&r.table, key)) ail_iset_discard(&r, key);
+            else ail_iset_add(&r, key);
+        }
+    }
+    return r;
+}
+/* CPython's in-place `a ^= b` / a.symmetric_difference_update(b): start from a and toggle each
+   key of b in b's own table order (not `a ^ b`, which copies b and walks a). */
+static ail_iset ail_iset_xor_update(const ail_iset *a, const ail_iset *b) {
+    ail_iset_check(a); ail_iset_check(b);
+    ail_iset r = ail_idict_copy(a);
+    ail_iset_arm(&r);
+    if (b->con) {
+        for (int64_t s = 0; s <= b->cmask; s++) {
+            if (b->ckind[s] != AIL_IS_LIVE) continue;
+            int64_t key = b->ckey[s];
+            if (ail_tab_has(&r.table, key)) ail_iset_discard(&r, key);
+            else ail_iset_add(&r, key);
+        }
+    } else {
+        const int64_t *order = ail_tab_order(&b->table);
+        for (int64_t j = 0; j < b->table.n; j++) {
+            int64_t key = order[j];
+            if (ail_tab_has(&r.table, key)) ail_iset_discard(&r, key);
+            else ail_iset_add(&r, key);
+        }
+    }
+    return r;
+}
 '''
 
 SSET = r'''
@@ -26416,11 +27005,21 @@ static int64_t ail_iset_disjoint(const ail_iset *a, const ail_iset *b) {
 static int64_t ail_iset_pop(ail_iset *T) {
     ail_iset_check(T);
     if (T->table.n <= 0) ail_set_pop_empty();
-    int64_t j, key = ail_tab_first_live(&T->table, &j);
-    uint64_t epoch = ail_idict_next_epoch(T);
-    ail_tab_del_first(&T->table, key, j);
-    T->epoch = epoch;
-    return key;
+    ail_iset_arm(T);
+    int64_t mask = T->cmask, i = T->cfin & mask;
+    for (int64_t seen = 0; seen <= mask; seen++) {
+        if (T->ckind[i] == AIL_IS_LIVE) {
+            int64_t key = T->ckey[i];
+            T->ckind[i] = AIL_IS_DUMMY; T->cu--; T->cfin = i + 1;
+            uint64_t epoch = ail_idict_next_epoch(T);
+            ail_tab_del(&T->table, key);
+            T->epoch = epoch;
+            return key;
+        }
+        i = (i + 1) & mask;
+    }
+    ail_set_pop_empty();
+    return 0;
 }
 """
 SSETOPS = r"""
