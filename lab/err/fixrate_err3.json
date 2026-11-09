@@ -1,0 +1,166 @@
+[
+ {
+  "id": "02_poprow_arity",
+  "file": "02_poprow_arity.py",
+  "needle": "' is bound from popping rows of",
+  "message": "note: lab/err/triggers/02_poprow_arity.py:78:13: built on the general path (about 20x slower) because 'entry' is bound from popping rows of different widths: `entry = heappop(departures)`, `entry = heappop(wait1)`, `heappop(wait2)` and `heappop(wait3)`; a captured row has one arity, the same rule an ordinary list of records already follows. Give the rows popped from 'departures' a name of their own; run with --strict to see why",
+  "baseline": {
+   "build_rc": 0,
+   "cpython_rc": 0,
+   "cpython_out": "ships 6\nmakespan 19\nwait total 25 max 11 ship 9\nberth 0 ships 3 busy 16\nberth 1 ships 3 busy 19\ndigest 848173799\n",
+   "ail_rc": 0,
+   "ail_same": true,
+   "saw_message": "note: /tmp/errfix-02_poprow_arity-f2fmcvu7/main.py:78:13: built on the general path (about 20x slower) because 'entry' is bound from popping rows of different widths: `entry = heappop(departures)`, `entry = heappop(wait1)`, `heappop(wait2)` and `heappop(wait3)`; a captured row has one arity, the same rule an ordinary list of records already follows. Give the rows popped from 'departures' a name of their own; run with --strict to see why"
+  },
+  "attempts": [
+   {
+    "n": 1,
+    "reply_chars": 4556,
+    "code_chars": 4543,
+    "error": "",
+    "build_rc": 0,
+    "message": "",
+    "run_rc": 0,
+    "output_matches": true,
+    "message_gone": true,
+    "status": "fixed",
+    "detail": "builds, output matches, message gone"
+   },
+   {
+    "n": 2,
+    "reply_chars": 4556,
+    "code_chars": 4543,
+    "error": "",
+    "build_rc": 0,
+    "message": "",
+    "run_rc": 0,
+    "output_matches": true,
+    "message_gone": true,
+    "status": "fixed",
+    "detail": "builds, output matches, message gone"
+   },
+   {
+    "n": 3,
+    "reply_chars": 4556,
+    "code_chars": 4543,
+    "error": "",
+    "build_rc": 0,
+    "message": "",
+    "run_rc": 0,
+    "output_matches": true,
+    "message_gone": true,
+    "status": "fixed",
+    "detail": "builds, output matches, message gone"
+   },
+   {
+    "n": 4,
+    "reply_chars": 4556,
+    "code_chars": 4543,
+    "error": "",
+    "build_rc": 0,
+    "message": "",
+    "run_rc": 0,
+    "output_matches": true,
+    "message_gone": true,
+    "status": "fixed",
+    "detail": "builds, output matches, message gone"
+   },
+   {
+    "n": 5,
+    "reply_chars": 4540,
+    "code_chars": 4527,
+    "error": "",
+    "build_rc": 0,
+    "message": "",
+    "run_rc": 0,
+    "output_matches": true,
+    "message_gone": true,
+    "status": "fixed",
+    "detail": "builds, output matches, message gone"
+   }
+  ],
+  "fixed": 5
+ },
+ {
+  "id": "11_fraction_dunder",
+  "file": "11_fraction_dunder.py",
+  "needle": "dunder method Fraction.__float__",
+  "message": "note: lab/err/triggers/11_fraction_dunder.py:3:7: built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...) (this note comes from the standard library's fractions module); run with --strict to see why",
+  "baseline": {
+   "build_rc": 0,
+   "cpython_rc": 0,
+   "cpython_out": "0.5\n",
+   "ail_rc": 0,
+   "ail_same": true,
+   "saw_message": "note: /tmp/errfix-11_fraction_dunder-dl3hknmy/main.py:3:7: built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...) (this note comes from the standard library's fractions module); run with --strict to see why"
+  },
+  "attempts": [
+   {
+    "n": 1,
+    "reply_chars": 98,
+    "code_chars": 85,
+    "error": "",
+    "build_rc": 0,
+    "message": "note: /tmp/errfix-11_fraction_dunder-dl3hknmy/attempt1.py:2:5: built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...) (this note comes from the standard library's fractions module); run with --strict to see why",
+    "run_rc": 0,
+    "output_matches": true,
+    "message_gone": false,
+    "status": "still_blocked",
+    "detail": "target message remains"
+   },
+   {
+    "n": 2,
+    "reply_chars": 99,
+    "code_chars": 86,
+    "error": "",
+    "build_rc": 0,
+    "message": "note: /tmp/errfix-11_fraction_dunder-dl3hknmy/attempt2.py:3:5: built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...) (this note comes from the standard library's fractions module); run with --strict to see why",
+    "run_rc": 0,
+    "output_matches": true,
+    "message_gone": false,
+    "status": "still_blocked",
+    "detail": "target message remains"
+   },
+   {
+    "n": 3,
+    "reply_chars": 98,
+    "code_chars": 85,
+    "error": "",
+    "build_rc": 0,
+    "message": "note: /tmp/errfix-11_fraction_dunder-dl3hknmy/attempt3.py:2:5: built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...) (this note comes from the standard library's fractions module); run with --strict to see why",
+    "run_rc": 0,
+    "output_matches": true,
+    "message_gone": false,
+    "status": "still_blocked",
+    "detail": "target message remains"
+   },
+   {
+    "n": 4,
+    "reply_chars": 98,
+    "code_chars": 85,
+    "error": "",
+    "build_rc": 0,
+    "message": "note: /tmp/errfix-11_fraction_dunder-dl3hknmy/attempt4.py:2:5: built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...) (this note comes from the standard library's fractions module); run with --strict to see why",
+    "run_rc": 0,
+    "output_matches": true,
+    "message_gone": false,
+    "status": "still_blocked",
+    "detail": "target message remains"
+   },
+   {
+    "n": 5,
+    "reply_chars": 98,
+    "code_chars": 85,
+    "error": "",
+    "build_rc": 0,
+    "message": "note: /tmp/errfix-11_fraction_dunder-dl3hknmy/attempt5.py:2:5: built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...) (this note comes from the standard library's fractions module); run with --strict to see why",
+    "run_rc": 0,
+    "output_matches": true,
+    "message_gone": false,
+    "status": "still_blocked",
+    "detail": "target message remains"
+   }
+  ],
+  "fixed": 0
+ }
+]

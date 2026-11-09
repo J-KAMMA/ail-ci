@@ -4737,6 +4737,139 @@ def _sorted_key_call(n):
     return n.args[0].id, key
 
 
+_ROW_INTERNAL_PREFIXES = ('_ail_', '_poprow_')
+
+
+def _row_internal(name):
+    """A name this compiler invented (a lowering temporary or a private pop scratch)."""
+    return name.startswith(_ROW_INTERNAL_PREFIXES)
+
+
+def _row_alias_group(fn):
+    """A function over names: `name -> the names joined to it by `a = b` assignments`.
+
+    The heap lowering turns `entry = heapq.heappop(departures)` into `_ail_l1l = departures.pop()`,
+    `_ail_l1r = _ail_l1l`, `entry = _ail_l1r`.  The row conflict is detected on the private
+    `_ail_l1l`, but the user only knows `entry`; this recovers the user's name from the temporary.
+    """
+    parent = {}
+
+    def find(name):
+        parent.setdefault(name, name)
+        root = name
+        while parent[root] != root:
+            root = parent[root]
+        while parent[name] != name:
+            following = parent[name]
+            parent[name] = root
+            name = following
+        return root
+
+    def union(left, right):
+        left, right = find(left), find(right)
+        if left != right:
+            parent[right] = left
+
+    for node in ast.walk(fn):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Name)):
+            union(node.targets[0].id, node.value.id)
+        elif (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+              and isinstance(node.value, ast.Name)):
+            union(node.target.id, node.value.id)
+    groups = {}
+    for name in list(parent):
+        groups.setdefault(find(name), set()).add(name)
+    return lambda name: groups.get(find(name), {name})
+
+
+def _row_pop_sites(fn):
+    """`target name -> [(source list, line, column, user name)]` for every `target = source.pop()`.
+
+    `user name` is the source-level name the popped row lands in: the target itself, or -- for a
+    private temporary the heap lowering introduced (`_ail_l1l = h1.pop()`, `_ail_l1r = _ail_l1l`,
+    `entry = _ail_l1r`) -- the name its chain of `a = b` assignments ends at.  Following the chain
+    forward (value -> target) keeps two different user names apart even when the source aliases
+    them (`y = x`); a union-find would merge them."""
+    forward = {}
+    links = [node for node in ast.walk(fn)
+             if ((isinstance(node, ast.Assign) and len(node.targets) == 1
+                  and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Name))
+                 or (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+                     and isinstance(node.value, ast.Name)))]
+    links.sort(key=lambda node: (node.lineno, node.col_offset))
+    for node in links:
+        if isinstance(node, ast.Assign):
+            forward.setdefault(node.value.id, node.targets[0].id)
+        else:
+            forward.setdefault(node.value.id, node.target.id)
+
+    def user_name(name):
+        seen = set()
+        while _row_internal(name) and name not in seen:
+            seen.add(name)
+            following = forward.get(name)
+            if following is None:
+                break
+            name = following
+        return name
+
+    sites = {}
+    for node in ast.walk(fn):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Attribute)
+                and node.value.func.attr == 'pop'
+                and isinstance(node.value.func.value, ast.Name)):
+            target = node.targets[0].id
+            sites.setdefault(target, []).append(
+                (node.value.func.value.id, node.lineno, node.col_offset, user_name(target)))
+    return sites
+
+
+def _row_conflict_note(alias_group, pop_sites, target, src, line):
+    """(cause, source line) for a row-arity conflict in the user's own names, or (None, None).
+
+    `target` may be a lowering temporary.  Every pop of a name in its alias group is a user pop
+    site; the note names the user's row variable and each list it was popped from, and points the
+    position at the first of those sites.  It never spells a call the user did not write: the same
+    note covers `x = h.pop()` and `x = heapq.heappop(h)`, and the lowering cannot tell them apart.
+    """
+    group = alias_group(target)
+    related = []
+    for name in group:
+        for source, lineno, column, user in pop_sites.get(name, ()):
+            if not _row_internal(source):
+                related.append((lineno, column, source, user))
+    if not related and not _row_internal(src):
+        related.append((line, 0, src, target))
+    related.sort()
+    sites = []
+    for lineno, _column, source, user in related:
+        if all(source != seen for _at, seen, _u in sites):
+            sites.append((lineno, source, user))
+    if not sites:
+        return None, None
+    # The name bound at the last pop is the one whose own row disagrees; when every site lands in
+    # the same name (the `entry`/`r` cases) that is the same answer either way.
+    user = sites[-1][2]
+    if _row_internal(user):
+        user = sites[0][2]
+    parts = []
+    for _lineno, source, site_user in sites:
+        text = "'%s'" % source
+        if site_user != user and not _row_internal(site_user):
+            text += ", popped into '%s'" % site_user
+        parts.append(text)
+    cause = ("'%s' is bound from popping rows of different widths: %s; a captured row has one "
+             "arity, the same rule an ordinary list of records already follows. Give the rows "
+             "popped from one of those lists a name of their own"
+             % (user, ', '.join(parts)))
+    return cause, related[0][0]
+
+
 def _mark_tuple_lists(fn, seed=None, params=None, exclude=()):
     """Which names are lists of fixed-arity integer records, how wide a row is, and which names
     hold ONE ROW of one -- decided ahead of codegen from the source alone, the same way
@@ -4766,6 +4899,8 @@ def _mark_tuple_lists(fn, seed=None, params=None, exclude=()):
     # `.pop()` at all. `_fresh_capture_name` picks a name for `r`'s private one-row scratch list
     # that cannot collide with anything the source actually uses.
     _all_names = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
+    _alias_group = _row_alias_group(fn)
+    _pop_sites = _row_pop_sites(fn)
 
     def _fresh_capture_name(base):
         name = '_poprow_' + base
@@ -4853,7 +4988,7 @@ def _mark_tuple_lists(fn, seed=None, params=None, exclude=()):
                                   'records has one arity' % (name, arity[name], k))
             arity[name] = k
 
-    rowof, poprow_synth, changed = {}, {}, True
+    rowof, poprow_synth, poprow_origin, poprow_target, poprow_sites, changed = {}, {}, {}, {}, {}, True
     while changed:
         changed = False
         for n in _record_walk(fn):
@@ -4912,18 +5047,58 @@ def _mark_tuple_lists(fn, seed=None, params=None, exclude=()):
                 target, src = n.targets[0].id, n.value.func.value.id
                 if src in arity:
                     synth = poprow_synth.setdefault(target, _fresh_capture_name(target))
-                    try:
-                        if widen(synth, arity[src], 'copy'):
+                    poprow_target[synth] = target
+                    # The heap lowering follows `_ail_l1l = X.pop()` with `_ail_l1r = _ail_l1l`,
+                    # then reuses `_ail_l1r` for the sift's `_ail_l1r = X[0]`. Bind the companion
+                    # temporary to the capture NOW, so the later `X[0]` does not make the user's
+                    # popped row look like a row of X and widen X past its own appended tuples.
+                    for alias in _alias_group(target):
+                        if (_row_internal(alias) and alias.endswith('r')
+                                and alias[:-1] + 'l' == target and rowof.get(alias) != synth):
+                            rowof[alias] = synth
                             changed = True
-                    except Unsupported:
-                        # `widen`'s own message names the SYNTHETIC scratch-list name, which is
-                        # this compiler's own bookkeeping, not anything the user wrote -- name
-                        # `target` (the actual source-level name, `r`) instead.
-                        raise Unsupported(
-                            '%r is bound from popping rows of %d fields in one place and %d in '
-                            'another; a captured row has one arity, the same rule an ordinary '
-                            'list of records already follows'
-                            % (target, arity.get(synth), arity[src]))
+                    poprow_sites.setdefault(synth, n.lineno)
+                    origin = poprow_origin.setdefault(synth, src)
+                    if origin == src:
+                        # The same heap list can grow while this fixed point settles: the first
+                        # pass sees `departures[0][0]` (arity 1) before `append((t, b))` (arity
+                        # 2), so the capture must follow its own source instead of calling the
+                        # source's growth a disagreement between two pop sites.
+                        if arity.get(synth, 0) < arity[src]:
+                            arity[synth] = arity[src]
+                            changed = True
+                        elif arity.get(synth, 0) > arity[src]:
+                            # A field read on the captured row knows more than the source list
+                            # does (the heap was filled through a temporary the append rule
+                            # cannot see). With only this one heap behind the user's name, that
+                            # read is evidence about the heap's rows, not a disagreement.
+                            seen = []
+                            for name in _alias_group(target):
+                                for other, _line, _column, _user in _pop_sites.get(name, ()):
+                                    if not _row_internal(other) and other not in seen:
+                                        seen.append(other)
+                            if len(seen) <= 1 and widen(src, arity[synth], 'read'):
+                                changed = True
+                    else:
+                        try:
+                            if widen(synth, arity[src], 'copy'):
+                                changed = True
+                        except Unsupported:
+                            # `widen`'s own message names the SYNTHETIC scratch-list name, which is
+                            # this compiler's own bookkeeping, not anything the user wrote. Name the
+                            # user's row variable and every heap it was popped from; the lowering's
+                            # temporaries never reach the message.
+                            cause, source_line = _row_conflict_note(
+                                _alias_group, _pop_sites, target, src, n.lineno)
+                            if cause is not None:
+                                error = Unsupported(cause)
+                                error.source_line = source_line
+                                raise error from None
+                            raise Unsupported(
+                                '%r is bound from popping rows of %d fields in one place and %d in '
+                                'another; a captured row has one arity, the same rule an ordinary '
+                                'list of records already follows'
+                                % (target, arity.get(synth), arity[src]))
                     if target in rowof and rowof[target] != synth:
                         raise Unsupported(
                             '%r already names a row of %r; binding it to a popped row as well '
@@ -4984,6 +5159,23 @@ def _mark_tuple_lists(fn, seed=None, params=None, exclude=()):
                 continue
             if widen(owner, j + 1, 'read'):
                 changed = True
+
+    # A capture that follows one source can still be read for more fields than that source holds
+    # when the same USER name is also popped from a wider heap: the two syntheses share a name,
+    # so the reads blur together. That is a real disagreement, but it is only visible once the
+    # fixed point has settled; report it by the user's name and every heap involved.
+    for synth, origin in poprow_origin.items():
+        if origin in arity and arity.get(synth, 0) > arity[origin]:
+            target = poprow_target[synth]
+            cause, source_line = _row_conflict_note(
+                _alias_group, _pop_sites, target, origin, poprow_sites[synth])
+            if cause is None:
+                cause = ('%r is bound from popping rows of %d fields in one place and %d in '
+                         'another; a captured row has one arity, the same rule an ordinary list '
+                         'of records already follows' % (target, arity[origin], arity[synth]))
+            error = Unsupported(cause)
+            error.source_line = source_line
+            raise error from None
 
     return arity, {v: o for v, o in rowof.items() if o in arity}
 

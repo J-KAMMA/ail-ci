@@ -10,6 +10,7 @@
    refusal shows only its own note, and the returned tuples still match CPython on both builds.
 """
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 CLI = ROOT / 'ail_chatgpt.py'
+POPROW = (ROOT.parent / 'lab' / 'err' / 'triggers' / '02_poprow_arity.py').read_text(
+    encoding='utf-8')
+FRACTION_NOTE = 'from fractions import Fraction\nx = Fraction(1, 2)\nprint(float(x))\n'
+DECIMAL_NOTE = 'from decimal import Decimal\nd = Decimal("1.234")\nprint(f"{d:.2f}")\n'
+FRACTION_LATER_LITERAL = ('from fractions import Fraction\na = Fraction(1, 2)\n'
+                          'print(float(a))\nprint(float(3))\n')
+DECIMAL_LATER_LITERAL = ('from decimal import Decimal\nd = Decimal("2.5")\n'
+                         'print(f"{d:.1f}")\nprint(f"{1.5:.1f}")\n')
+DECIMAL_PLAIN = 'from decimal import Decimal\nd = Decimal("2.5")\nprint(d + d)\n'
 
 CLASS_ATTRS = r'''class A__B:
     n = {1: 2}
@@ -74,11 +84,13 @@ def cpython(directory, name, text):
     return done.stdout.replace(b'\r\n', b'\n'), done.returncode, done.stderr
 
 
-def build(directory, name, text, *, general):
-    src = Path(directory) / (name + '.ail')
+def build(directory, name, text, *, general, quiet=True, suffix='.ail'):
+    src = Path(directory) / (name + suffix)
     src.write_text(text, encoding='utf-8')
     exe = Path(directory) / (name + ('_g' if general else '_d'))
-    env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
+    env = dict(os.environ, AIL_NO_CACHE='1')
+    if quiet:
+        env['AIL_QUIET_FALLBACK'] = '1'
     env.pop('AIL_UNIFIED_FORCE', None)
     env.pop('AIL_NO_GENERAL', None)
     if general:
@@ -115,6 +127,62 @@ class Pre133Tests(unittest.TestCase):
                 self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want,
                                  got.stderr.decode('utf-8', 'replace'))
                 self.assertEqual(got.returncode, 0)
+
+    def test_poprow_note_names_the_users_rows(self):
+        # implementation step 2: a name bound from heaps of two row widths used to report a
+        # compiler temporary (`_ail_l1l`).  The note now names the user's variable and every heap
+        # it was popped from, at a position inside the user's file.
+        with tempfile.TemporaryDirectory(prefix='ail-pre133-') as directory:
+            done, _ = build(directory, 'poprow', POPROW, general=False, quiet=False)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            self.assertNotIn('_ail_', done.stderr)
+            note = next((line for line in done.stderr.splitlines() if 'popping rows' in line), '')
+            self.assertTrue(note, done.stderr)
+            self.assertIn("'entry'", note)
+            for heap in ('departures', 'wait1', 'wait2', 'wait3'):
+                self.assertIn(heap, note)
+            where = re.search(r':(\d+):(\d+):', note)
+            self.assertIsNotNone(where, note)
+            self.assertLessEqual(int(where.group(1)), len(POPROW.splitlines()))
+
+    def test_prelude_note_points_at_the_users_call(self):
+        # A refusal raised while loading `fractions`/`decimal` was reported at a line of the
+        # prelude (235, 1687).  The note now names the user's call and the module it came from.
+        cases = (('frac_note', FRACTION_NOTE, 'fractions', 'dunder'),
+                 ('dec_note', DECIMAL_NOTE, 'decimal', 'format spec'),
+                 ('frac_note_later_literal', FRACTION_LATER_LITERAL, 'fractions', 'dunder'),
+                 ('dec_note_later_literal', DECIMAL_LATER_LITERAL, 'decimal', 'format spec'))
+        for name, text, module, marker in cases:
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory(prefix='ail-pre133-') as directory:
+                    # a `.py` entry: the prelude-unit table is recorded for Python-syntax entries
+                    done, _ = build(directory, name, text, general=False, quiet=False,
+                                    suffix='.py')
+                    self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+                    note = next((line for line in done.stderr.splitlines() if marker in line), '')
+                    self.assertTrue(note, done.stderr)
+                    self.assertIn("standard library's %s module" % module, note)
+                    where = re.search(r':(\d+):(\d+):', note)
+                    self.assertIsNotNone(where, note)
+                    self.assertEqual(int(where.group(1)), 3, note)
+                    self.assertNotIn(':235:', note)
+                    self.assertNotIn(':1687:', note)
+
+    def test_prelude_note_without_the_unit_name_points_at_the_users_call(self):
+        # The reason names `_dec_cmp_parts`, a definition the decimal prelude adds, not the word
+        # `Decimal`; the note used to stay at prelude line 318.  It now names the user's use.
+        with tempfile.TemporaryDirectory(prefix='ail-pre133-') as directory:
+            done, _ = build(directory, 'dec_plain', DECIMAL_PLAIN, general=False, quiet=False,
+                            suffix='.py')
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            note = next((line for line in done.stderr.splitlines()
+                         if 'built on the general path' in line), '')
+            self.assertTrue(note, done.stderr)
+            self.assertIn("standard library's decimal module", note)
+            where = re.search(r':(\d+):(\d+):', note)
+            self.assertIsNotNone(where, note)
+            self.assertEqual(int(where.group(1)), 3, note)
+            self.assertNotIn(':318:', note)
 
     def test_fraction_prelude_adds_no_tuple_notes_to_a_refusal(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre133-') as directory:
