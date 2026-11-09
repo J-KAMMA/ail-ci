@@ -1,0 +1,20 @@
+# wedge3b library pins (copied from branch job-wedge3b-11091226,
+# lab/wedge3/wedge3b/requirements.txt)
+#
+# Pure-Python side (used by the CPython and PyPy 3.10 runs) --------------------
+# Install with --no-binary pydantic so the optional Cython extension is not built:
+#   pip install --no-binary pydantic -r requirements-wedge3b.txt
+pydantic==1.10.27
+sqlparse==0.6.1
+#
+# Rust-rewrite side (separate venv; do NOT install with the pure set) ----------
+#   pip install 'pydantic==2.14.3' 'sqlglot[rs]==26.33.0'
+# pydantic==2.14.3
+# pydantic-core==2.50.4
+# sqlglot[rs]==26.33.0
+# sqlglotrs==0.6.1
+#
+# sqlglot 30.x still accepts the [rs] extra but installs only a deprecated
+# `sqlglotrs` stub (a warning, no Rust module).  26.33.0 is the last line whose
+# [rs] extra pulls the real `sqlglotrs.cpython-312-x86_64-linux-gnu.so`; the
+# SQLGLOTRS_TOKENIZER default is "1", so the workload really uses it.
