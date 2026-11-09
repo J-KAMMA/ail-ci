@@ -80,6 +80,23 @@ transformer block is not expressible: layer norm, 2-D reductions, row broadcast 
 softmax are missing; the attention core is written with manual row loops. No Vulkan device on
 the runner (loader present, no ICD), and the GPU path covers marked loops only, not `ta.matmul`.
 12 small probes (`lab/aicomp/probes.py`) match CPython on both the default and unified builds.
+## 2026-11-09 -- dog1: gate-statistics tool written in AIL and compiled with ailc (job-dog1-11091728)
+
+Dogfooding, no compiler change. `lab/dogfood/gatestats/gatestats.py` (plain annotated Python, built by
+`AIL_CURRENT/ailc.py`) reads the integration-gate log and prints per-day candidates, merged jobs, red
+batches, red-alone jobs, culprit-unavailable events, and red-to-resolution hours, plus the top five
+modules that broke. The fixture `lab/dogfood/gatestats/fixture/ci_integ.out` is the 400-line task
+excerpt plus three noise lines; `expected.out` is the CPython reference.
+
+The tool works: CPython and the native binary are byte-identical on the fixture and on 11 probes
+(day rollover, empty/noise input, unresolved red, multiple reds before a candidate, culprit-only,
+shared-file merge, top-5 truncation), with both the default and the forced general build. The
+`--strict` build succeeds (same 99,120-byte binary and SHA-256 as default), so the typed path built
+the whole program. Cold compile median 1.78 s (warm cache 0.21 s); run median 0.0006 s and peak RSS
+1,968 KB versus CPython 0.020 s and 13,156 KB on the fixture (median of 5). Friction: three `check`
+rounds, about 6 minutes, mostly a refusal of `list[tuple[int, str]]` ("`top` is a srows") that did
+not name the replacement; see `lab/dogfood/gatestats/FRICTION.md` for the table and probes.
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass (3 modules, 0 failed).
 
 ## 2026-11-08 -- fz243: the reported seed does not reproduce on this tree; no code changed (job-fz243-11090607)
 
