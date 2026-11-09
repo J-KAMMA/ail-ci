@@ -368,9 +368,8 @@ class SeededReturns(unittest.TestCase):
                         tmp, env=dict(os.environ, AIL_NO_CACHE='1'))
             self.assertEqual(built.returncode, 0, built.stderr[-3000:])
             report = json.loads((out / 'build.json').read_text(encoding='utf-8'))
-            # `count` calls a user function, which the body gate still refuses, and `in_limit`
-            # reads a module constant, which `to_c` refuses in a defs-only slice; both are here
-            # for the output comparison.
+            # `count` calls a user function and `in_limit` reads a module constant (both native
+            # since obs4, test_ail_hybrid_calls.py); here they are only in the output comparison.
             for name in ('is_ident_start', 'in_range', 'either'):
                 self.assertIn(name, report['accelerated'], report['rejected'].get(name))
             self.assertNotIn('lies', report['accelerated'])
