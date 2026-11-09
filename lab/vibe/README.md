@@ -1,8 +1,9 @@
 # lab/vibe
 
-The vibe-coding benchmark: the same AI writes the same ten tasks (plus `csv_rollup`) in Python,
-Rust and AIL, and we compare how often it ends with a correct program, how many fix rounds it
-needs, and how many wrong answers are silent.
+The vibe-coding benchmark: the same AI writes the same tasks in Python, Rust, Go and AIL, and we
+compare how often it ends with a correct program, how many fix rounds it needs, and how many wrong
+answers are silent. The tasks are the ten compare-lab tasks plus `csv_rollup` (the vibe1 set) and
+the ten app-like tasks written for vibe3 in `tasks2/`.
 
 - `run.py` — the harness. It asks a model CLI for one file, builds and runs the task's public
   cases, sends the compiler or runtime error (or the first diff) back, up to 5 rounds, then runs
@@ -21,6 +22,7 @@ needs, and how many wrong answers are silent.
 |---|---|
 | python | CPython 3.12 on the `.py` file the AI wrote |
 | rust   | `rustc -O --edition=2021` on the `.rs` file the AI wrote |
+| go     | `go build -o main main.go` (standard library only) on the `.go` file the AI wrote |
 | ail    | AIL (`compile --syntax python`) on the plain Python the AI wrote for the ail prompt |
 
 The task's own `reference.py` is the oracle. Public and hidden cases come from the task's

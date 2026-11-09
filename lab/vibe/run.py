@@ -41,10 +41,11 @@ AIL = REPO / 'AIL_CURRENT' / 'ail_chatgpt.py'
 RESULTS = HERE / 'results.json'
 PROGRAMS = HERE / 'programs'
 AIL_LANGS = ('ail', 'ail-strict', 'ail-new')
-LANGS = ('python', 'rust', 'ail', 'ail-strict', 'ail-new')
-EXT = {'python': '.py', 'rust': '.rs', 'ail': '.py', 'ail-strict': '.py', 'ail-new': '.nw'}
-CODE_TAG = {'python': 'python', 'rust': 'rust', 'ail': 'python', 'ail-strict': 'python', 'ail-new': 'ail'}
-LANG_NAME = {'python': 'Python 3.12', 'rust': 'Rust 2021', 'ail': 'AIL (a Python-syntax language)',
+LANGS = ('python', 'rust', 'go', 'ail', 'ail-strict', 'ail-new')
+EXT = {'python': '.py', 'rust': '.rs', 'go': '.go', 'ail': '.py', 'ail-strict': '.py', 'ail-new': '.nw'}
+CODE_TAG = {'python': 'python', 'rust': 'rust', 'go': 'go', 'ail': 'python', 'ail-strict': 'python', 'ail-new': 'ail'}
+LANG_NAME = {'python': 'Python 3.12', 'rust': 'Rust 2021', 'go': 'Go 1.24',
+             'ail': 'AIL (a Python-syntax language)',
              'ail-strict': 'AIL (a Python-syntax language; strict-path rules in the note)',
              'ail-new': 'AIL-N (the typed surface in the note)'}
 
@@ -59,6 +60,10 @@ LANG_NOTE = {
     'rust': ('Rust 2021, standard library only, no crates. The program is built with '
              '`rustc -O --edition=2021 main.rs` and run as `./main [args...]`; it reads standard '
              'input and writes standard output.'),
+    'go': ('Go 1.24, standard library only, no modules or third-party packages. The program is a '
+           'single file `main.go` with `package main` and `func main()`, built with '
+           '`go build -o main main.go` and run as `./main [args...]`; it reads standard input and '
+           'writes standard output.'),
     'ail': None,   # filled from AIL_FOR_AI.md
     'ail-strict': None,   # filled from lab/vibe2/STRICT_SPEC.md
     'ail-new': None,      # filled from lab/vibe2/NEW_SURFACE.md
@@ -69,15 +74,21 @@ LANG_NOTE = {
 # tasks and cases
 
 def task_list():
-    """(name, directory) for the ten compare-lab tasks plus compare_cand/csv_rollup when present."""
+    """The vibe1 tasks (compare lab plus csv_rollup) and the app-like tasks in lab/vibe/tasks2.
+
+    The new tasks come first so a run cut short by the wall-clock budget still has a complete
+    column for them; the old tasks are there for the delta against vibe1."""
     out = []
-    base = REPO / 'lab' / 'compare' / 'tasks'
-    for p in sorted(base.iterdir()):
-        if (p / 'gen.py').is_file() and (p / 'spec.md').is_file():
-            out.append((p.name, p))
-    cand = REPO / 'lab' / 'compare_cand' / 'tasks' / 'csv_rollup'
-    if (cand / 'gen.py').is_file() and (cand / 'spec.md').is_file():
-        out.append(('csv_rollup', cand))
+    for base, extra in ((HERE / 'tasks2', ()),
+                        (REPO / 'lab' / 'compare' / 'tasks', ()),
+                        (REPO / 'lab' / 'compare_cand' / 'tasks', ('csv_rollup',))):
+        if not base.is_dir():
+            continue
+        for p in sorted(base.iterdir()):
+            if extra and p.name not in extra:
+                continue
+            if (p / 'gen.py').is_file() and (p / 'spec.md').is_file():
+                out.append((p.name, p))
     return out
 
 
@@ -158,6 +169,8 @@ def build_program(lang, src, work, exe, line_map=None):
         return dict(ok=True, seconds=0.0, cmd=[sys.executable, '-B', str(src)], stderr='', stdout='', typed=None)
     if lang == 'rust':
         cmd = ['rustc', '-O', '--edition=2021', '-o', str(exe), str(src)]
+    elif lang == 'go':
+        cmd = ['go', 'build', '-o', str(exe), str(src)]
     else:
         cmd = [sys.executable, '-B', str(AIL), 'compile', str(src), '--syntax', 'python', '-o', str(exe)]
     exe.unlink(missing_ok=True)   # AIL refuses to overwrite an existing -o output; a fix round rebuilds
@@ -328,8 +341,10 @@ class Model:
     def _opencode(self, prompt, workdir):
         pf = workdir / 'prompt.txt'
         pf.write_text(prompt)
+        # -f/--file is an array option: a positional message after it would be eaten as another
+        # file, so the message comes first and the attachment last (2026-11-09).
         cmd = [self.bin, 'run', '--format', 'json', '--dir', str(workdir), '-m', self.name,
-               '-f', str(pf), 'Answer the attached prompt. Do not edit files or run commands.']
+               'Answer the attached prompt. Do not edit files or run commands.', '--file', str(pf)]
         rc, raw, err = run_cli(cmd, None, workdir, self.timeout,
                                workdir / 'model-out.jsonl', workdir / 'model-err.txt')
         texts, tokens = [], 0
