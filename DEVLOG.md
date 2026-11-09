@@ -1,3 +1,21 @@
+## 2026-11-09 -- dog1: gate-statistics tool written in AIL and compiled with ailc (job-dog1-11091728)
+
+Dogfooding, no compiler change. `lab/dogfood/gatestats/gatestats.py` (plain annotated Python, built by
+`AIL_CURRENT/ailc.py`) reads the integration-gate log and prints per-day candidates, merged jobs, red
+batches, red-alone jobs, culprit-unavailable events, and red-to-resolution hours, plus the top five
+modules that broke. The fixture `lab/dogfood/gatestats/fixture/ci_integ.out` is the 400-line task
+excerpt plus three noise lines; `expected.out` is the CPython reference.
+
+The tool works: CPython and the native binary are byte-identical on the fixture and on 9 probes
+(day rollover, empty/noise input, unresolved red, multiple reds before a candidate, culprit-only,
+shared-file merge, top-5 truncation), with both the default and the forced general build. The
+`--strict` build succeeds (same 98,888-byte binary and SHA-256 as default), so the typed path built
+the whole program. Cold compile median 2.04 s (warm cache 0.17 s); run median 0.0009 s and peak RSS
+1,968 KB versus CPython 0.0291 s and 13,008 KB on the fixture (median of 5). Friction: three `check`
+rounds, about 6 minutes, mostly a refusal of `list[tuple[int, str]]` ("`top` is a srows") that did
+not name the replacement; see `lab/dogfood/gatestats/FRICTION.md` for the table and probes.
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass (3 modules, 0 failed).
+
 ## 2026-11-08 -- fz243: the reported seed does not reproduce on this tree; no code changed (job-fz243-11090607)
 
 The daily fuzzer (run 42517310228, seed `2076519205`, CPython 3.12, modes default+ir) recorded
