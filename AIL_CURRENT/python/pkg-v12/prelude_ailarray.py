@@ -2199,7 +2199,8 @@ def _ail_ta_ne_shape2(a: _AilTAM, b: _AilTAF) -> bool:
 
 
 def _ail_tam_bin(a: _AilTAM, b: _AilTAM, op: int) -> _AilTAM:
-    _ail_tam_chk(a, b)
+    if a.r != b.r or a.c != b.c:
+        return _ail_tam_bbin(a, b, op, 0)
     return _ail_tam_w(a, _ail_taf_bin(_ail_tam_v(a), _ail_tam_v(b), op))
 
 
@@ -2208,9 +2209,140 @@ def _ail_tam_bin_s(a: _AilTAM, x: float, op: int, refl: bool) -> _AilTAM:
 
 
 def _ail_tam_ibin(a: _AilTAM, b: _AilTAM, op: int) -> _AilTAM:
-    _ail_tam_chk(a, b)
+    if a.r != b.r or a.c != b.c:
+        return _ail_tam_ibbin(a, b, op, 0)
     _ail_taf_ibin(_ail_tam_v(a), _ail_tam_v(b), op)
     return a
+
+
+# ---- broadcasting of 2-D arrays (job aicore1): NumPy's rule on 1-D / 2-D ------------------------------------------------
+# A 1-D operand arrives as a one-row matrix (`of1`); bit 1 of `fl` says the left operand was 1-D, bit 2 the right one (only
+# for the error text, which names the shapes as the reference does). Each dimension must be equal or 1 on one side; the side
+# with 1 is repeated by a copy (`bc`), then the same-shape operation runs, so every element is the 1-D operation's bits.
+def _ail_ta_shp(r: int, c: int, one: bool) -> str:
+    if one:
+        return "(" + str(c) + ",)"
+    return "(" + str(r) + ", " + str(c) + ")"
+
+
+def _ail_ta_bshape(ar: int, ac: int, br: int, bc: int, fl: int) -> list[int]:
+    r = -1
+    c = -1
+    if ar == br or br == 1:
+        r = ar
+    elif ar == 1:
+        r = br
+    if ac == bc or bc == 1:
+        c = ac
+    elif ac == 1:
+        c = bc
+    if r < 0 or c < 0:
+        raise ValueError("ail_array: shapes differ: " + _ail_ta_shp(ar, ac, fl % 2 == 1) + " and "
+                         + _ail_ta_shp(br, bc, fl // 2 == 1))
+    return [r, c]
+
+
+def _ail_ta_bshape_into(ar: int, ac: int, br: int, bc: int, fl: int):
+    # an in-place operation keeps the shape of its left side
+    sh = _ail_ta_bshape(ar, ac, br, bc, fl)
+    if sh[0] != ar or sh[1] != ac:
+        raise ValueError("ail_array: shapes differ: " + _ail_ta_shp(ar, ac, fl % 2 == 1) + " and "
+                         + _ail_ta_shp(br, bc, fl // 2 == 1))
+
+
+def _ail_tam_of1(v: _AilTAF) -> _AilTAM:
+    out = _AilTAM(0, 0)
+    out.r = 1
+    out.c = len(v.d)
+    out.v = v
+    return out
+
+
+def _ail_tam_bc(a: _AilTAM, r: int, c: int) -> _AilTAM:
+    # a repeated to (r, c): a dimension of 1 repeats; the same array when the shape is already (r, c)
+    if a.r == r and a.c == c:
+        return a
+    out = _AilTAM(r, c)
+    for i in range(r):
+        p = i
+        if a.r == 1:
+            p = 0
+        for j in range(c):
+            q = j
+            if a.c == 1:
+                q = 0
+            out.v.d[i * c + j] = a.v.d[p * a.c + q]
+    return out
+
+
+def _ail_tam_bbin(a: _AilTAM, b: _AilTAM, op: int, fl: int) -> _AilTAM:
+    sh = _ail_ta_bshape(a.r, a.c, b.r, b.c, fl)
+    x = _ail_tam_bc(a, sh[0], sh[1])
+    y = _ail_tam_bc(b, sh[0], sh[1])
+    return _ail_tam_w(x, _ail_taf_bin(_ail_tam_v(x), _ail_tam_v(y), op))
+
+
+def _ail_tam_ibbin(a: _AilTAM, b: _AilTAM, op: int, fl: int) -> _AilTAM:
+    _ail_ta_bshape_into(a.r, a.c, b.r, b.c, fl)
+    y = _ail_tam_bc(b, a.r, a.c)
+    _ail_taf_ibin(_ail_tam_v(a), _ail_tam_v(y), op)
+    return a
+
+
+def _ail_tam_bpick(a: _AilTAM, b: _AilTAM, smaller: bool, fl: int) -> _AilTAM:
+    sh = _ail_ta_bshape(a.r, a.c, b.r, b.c, fl)
+    x = _ail_tam_bc(a, sh[0], sh[1])
+    y = _ail_tam_bc(b, sh[0], sh[1])
+    return _ail_tam_w(x, _ail_taf_pick_aa(_ail_tam_v(x), _ail_tam_v(y), smaller))
+
+
+# ---- reductions along an axis (job aicore1): each row (rows 1) or column (rows 0) reduced by the 1-D function ------------
+def _ail_tam_rows(a: _AilTAM, rows: int) -> _AilTAM:
+    if rows == 1:
+        return a
+    return _ail_tam_t(a)
+
+
+def _ail_tam_rsum(a: _AilTAM, rows: int) -> _AilTAF:
+    m = _ail_tam_rows(a, rows)
+    out = _AilTAF(m.r)
+    for i in range(m.r):
+        out.d[i] = _ail_taf_sum(_ail_tam_row(m, i))
+    return out
+
+
+def _ail_tam_rext(a: _AilTAM, rows: int, smaller: bool) -> _AilTAF:
+    m = _ail_tam_rows(a, rows)
+    out = _AilTAF(m.r)
+    for i in range(m.r):
+        if smaller:
+            out.d[i] = _ail_taf_min(_ail_tam_row(m, i))
+        else:
+            out.d[i] = _ail_taf_max(_ail_tam_row(m, i))
+    return out
+
+
+def _ail_tam_rarg(a: _AilTAM, rows: int, smaller: bool) -> _AilTAI:
+    m = _ail_tam_rows(a, rows)
+    out = _AilTAI(m.r)
+    for i in range(m.r):
+        if smaller:
+            out.d[i] = _ail_taf_argmin(_ail_tam_row(m, i))
+        else:
+            out.d[i] = _ail_taf_argmax(_ail_tam_row(m, i))
+    return out
+
+
+def _ail_tam_keep(v: _AilTAF, rows: int) -> _AilTAM:
+    # keepdims=True: (n, 1) for a reduction of the rows, (1, n) for one of the columns
+    out = _AilTAM(0, 0)
+    out.r = len(v.d)
+    out.c = 1
+    if rows == 0:
+        out.r = 1
+        out.c = len(v.d)
+    out.v = v
+    return out
 
 
 def _ail_tam_ibin_s(a: _AilTAM, x: float, op: int) -> _AilTAM:
@@ -2231,7 +2363,8 @@ def _ail_tam_fn(a: _AilTAM, which: int) -> _AilTAM:
 
 
 def _ail_tam_pick_aa(a: _AilTAM, b: _AilTAM, smaller: bool) -> _AilTAM:
-    _ail_tam_chk(a, b)
+    if a.r != b.r or a.c != b.c:
+        return _ail_tam_bpick(a, b, smaller, 0)
     return _ail_tam_w(a, _ail_taf_pick_aa(_ail_tam_v(a), _ail_tam_v(b), smaller))
 
 
@@ -2522,6 +2655,159 @@ def _ail_tams_matmul(a: _AilTAMS, b: _AilTAMS) -> _AilTAMS:
                          + ") do not match: " + str(a.c) + " != " + str(b.r))
     out = _AilTAMS(a.r, b.c)
     _ail_tz_mm(out.v.b, a.v.b, b.v.b, a.r, a.c, b.c)
+    return out
+
+
+# ---- 2-D f32: element-wise operations, broadcasting and axis reductions (job aicore1) -----------------------------------
+# Every element-wise function of a 2-D f32 array is the 1-D f32 function on `.v` (so the bits are the 1-D ones, in place
+# included) behind the shape checks; broadcasting and the axis reductions follow the f64 functions above.
+def _ail_tams_wv(a: _AilTAMS, v: _AilTAS) -> _AilTAMS:
+    out = _AilTAMS(0, 0)
+    out.r = a.r
+    out.c = a.c
+    out.v = v
+    return out
+
+
+def _ail_tams_of1(v: _AilTAS) -> _AilTAMS:
+    out = _AilTAMS(0, 0)
+    out.r = 1
+    out.c = v.n
+    out.v = v
+    return out
+
+
+def _ail_tams_bc(a: _AilTAMS, r: int, c: int) -> _AilTAMS:
+    if a.r == r and a.c == c:
+        return a
+    out = _AilTAMS(r, c)
+    for i in range(r):
+        p = i
+        if a.r == 1:
+            p = 0
+        for j in range(c):
+            q = j
+            if a.c == 1:
+                q = 0
+            src = 4 * (p * a.c + q)
+            dst = 4 * (i * c + j)
+            out.v.b[dst] = a.v.b[src]
+            out.v.b[dst + 1] = a.v.b[src + 1]
+            out.v.b[dst + 2] = a.v.b[src + 2]
+            out.v.b[dst + 3] = a.v.b[src + 3]
+    return out
+
+
+def _ail_tams_bbin(a: _AilTAMS, b: _AilTAMS, op: int, fl: int) -> _AilTAMS:
+    sh = _ail_ta_bshape(a.r, a.c, b.r, b.c, fl)
+    x = _ail_tams_bc(a, sh[0], sh[1])
+    y = _ail_tams_bc(b, sh[0], sh[1])
+    return _ail_tams_wv(x, _ail_tas_bin(x.v, y.v, op))
+
+
+def _ail_tams_ibbin(a: _AilTAMS, b: _AilTAMS, op: int, fl: int) -> _AilTAMS:
+    _ail_ta_bshape_into(a.r, a.c, b.r, b.c, fl)
+    y = _ail_tams_bc(b, a.r, a.c)
+    _ail_tas_ibin(a.v, y.v, op)
+    return a
+
+
+def _ail_tams_bpick(a: _AilTAMS, b: _AilTAMS, smaller: bool, fl: int) -> _AilTAMS:
+    sh = _ail_ta_bshape(a.r, a.c, b.r, b.c, fl)
+    x = _ail_tams_bc(a, sh[0], sh[1])
+    y = _ail_tams_bc(b, sh[0], sh[1])
+    return _ail_tams_wv(x, _ail_tas_pick_aa(x.v, y.v, smaller))
+
+
+def _ail_tams_bin(a: _AilTAMS, b: _AilTAMS, op: int) -> _AilTAMS:
+    if a.r != b.r or a.c != b.c:
+        return _ail_tams_bbin(a, b, op, 0)
+    return _ail_tams_wv(a, _ail_tas_bin(a.v, b.v, op))
+
+
+def _ail_tams_bin_s(a: _AilTAMS, x: float, op: int, refl: bool) -> _AilTAMS:
+    return _ail_tams_wv(a, _ail_tas_bin_s(a.v, x, op, refl))
+
+
+def _ail_tams_ibin(a: _AilTAMS, b: _AilTAMS, op: int) -> _AilTAMS:
+    if a.r != b.r or a.c != b.c:
+        return _ail_tams_ibbin(a, b, op, 0)
+    _ail_tas_ibin(a.v, b.v, op)
+    return a
+
+
+def _ail_tams_ibin_s(a: _AilTAMS, x: float, op: int) -> _AilTAMS:
+    _ail_tas_ibin_s(a.v, x, op)
+    return a
+
+
+def _ail_tams_neg(a: _AilTAMS) -> _AilTAMS:
+    return _ail_tams_wv(a, _ail_tas_neg(a.v))
+
+
+def _ail_tams_abs(a: _AilTAMS) -> _AilTAMS:
+    return _ail_tams_wv(a, _ail_tas_abs(a.v))
+
+
+def _ail_tams_fn(a: _AilTAMS, which: int) -> _AilTAMS:
+    return _ail_tams_wv(a, _ail_tas_fn(a.v, which))
+
+
+def _ail_tams_pick_aa(a: _AilTAMS, b: _AilTAMS, smaller: bool) -> _AilTAMS:
+    if a.r != b.r or a.c != b.c:
+        return _ail_tams_bpick(a, b, smaller, 0)
+    return _ail_tams_wv(a, _ail_tas_pick_aa(a.v, b.v, smaller))
+
+
+def _ail_tams_pick_as(a: _AilTAMS, s: float, smaller: bool) -> _AilTAMS:
+    return _ail_tams_wv(a, _ail_tas_pick_as(a.v, s, smaller))
+
+
+def _ail_tams_rows(a: _AilTAMS, rows: int) -> _AilTAMS:
+    if rows == 1:
+        return a
+    return _ail_tams_t(a)
+
+
+def _ail_tams_rsum(a: _AilTAMS, rows: int) -> _AilTAS:
+    # the f32 sum of each row in the order of 3.5 is an f32 value: storing it does not round
+    m = _ail_tams_rows(a, rows)
+    out = _AilTAS(m.r)
+    for i in range(m.r):
+        _ail_tz_put(out.b, i, _ail_tas_sum(_ail_tams_row(m, i)))
+    return out
+
+
+def _ail_tams_rext(a: _AilTAMS, rows: int, smaller: bool) -> _AilTAS:
+    m = _ail_tams_rows(a, rows)
+    out = _AilTAS(m.r)
+    for i in range(m.r):
+        if smaller:
+            _ail_tz_put(out.b, i, _ail_tas_min(_ail_tams_row(m, i)))
+        else:
+            _ail_tz_put(out.b, i, _ail_tas_max(_ail_tams_row(m, i)))
+    return out
+
+
+def _ail_tams_rarg(a: _AilTAMS, rows: int, smaller: bool) -> _AilTAI:
+    m = _ail_tams_rows(a, rows)
+    out = _AilTAI(m.r)
+    for i in range(m.r):
+        if smaller:
+            out.d[i] = _ail_tas_argmin(_ail_tams_row(m, i))
+        else:
+            out.d[i] = _ail_tas_argmax(_ail_tams_row(m, i))
+    return out
+
+
+def _ail_tams_keep(v: _AilTAS, rows: int) -> _AilTAMS:
+    out = _AilTAMS(0, 0)
+    out.r = v.n
+    out.c = 1
+    if rows == 0:
+        out.r = 1
+        out.c = v.n
+    out.v = v
     return out
 
 

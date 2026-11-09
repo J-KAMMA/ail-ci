@@ -66,6 +66,11 @@ SIG = {
     'sum': ('a', 'acc', 'order'), 'dot': ('a', 'b', 'acc', 'order'), 'min': ('a', 'order'), 'max': ('a', 'order'),
     'argmin': ('a',), 'argmax': ('a',),
 }
+# keyword-only parameters (job aicore1): the axis reductions of 2-D float arrays
+KWONLY = {'sum': ('axis', 'keepdims'), 'min': ('axis', 'keepdims'), 'max': ('axis', 'keepdims'), 'argmin': ('axis',),
+          'argmax': ('axis',)}
+REDUCE = ('sum', 'min', 'max', 'argmin', 'argmax')
+EW2 = ('MF', 'MS')                  # 2-D kinds with element-wise operations (f64: T6; f32: aicore1)
 OPS = {ast.Add: (0, '+'), ast.Sub: (1, '-'), ast.Mult: (2, '*'), ast.Div: (3, '/'), ast.FloorDiv: (3, '//'),
        ast.Mod: (4, '%')}
 BUILTIN_ITER = {'list', 'sorted', 'sum', 'min', 'max', 'enumerate', 'zip', 'reversed'}
@@ -280,6 +285,8 @@ class Typer:
         if l in ARR or r in ARR:
             if op not in OPS:
                 return None
+            if r in TWO and l not in TWO:
+                return r            # 1-D (or scalar) op 2-D broadcasts to 2-D
             if l in ARR:
                 return l
             return r
@@ -383,11 +390,21 @@ class Typer:
             return ka if ka in TWO else 'MF'
         a = self.kind(args['a'], env) if 'a' in args else None
         if found in ('sqrt', 'exp', 'log', 'tanh'):
-            return a if a in ('MF', 'AS') else 'AF'
+            return a if a in ('MF', 'MS', 'AS') else 'AF'
         if found in ('minimum', 'maximum', 'clip'):
+            b = self.kind(args['b'], env) if 'b' in args else None
+            if a in ARR and a not in TWO and b in TWO:
+                return b
             return a if a in ARR else None
         if found.startswith('wrapping') or found.startswith('saturating'):
             return 'AI'
+        if found in REDUCE and 'axis' in args:
+            if found in ('argmin', 'argmax'):
+                return 'AI'
+            keep = args.get('keepdims')
+            if a in EW2:
+                return a if isinstance(keep, ast.Constant) and keep.value is True else AKIND[a[1]]
+            return None
         if found in ('sum', 'dot', 'min', 'max'):
             return {'AF': 'F', 'AS': 'F', 'AI': 'I'}.get(a)
         if found in ('argmin', 'argmax'):
@@ -405,7 +422,7 @@ class Typer:
         for name, arg in zip(names, node.args):
             out[name] = arg
         for kw in node.keywords:
-            if kw.arg not in names or kw.arg in out:
+            if (kw.arg not in names and kw.arg not in KWONLY.get(found, ())) or kw.arg in out:
                 no(node, 'ta.%s(%s=...) is not a parameter it takes' % (found, kw.arg), 'ta.%s(%s)' % (found, ', '.join(names)))
             out[kw.arg] = kw.value
         return out
@@ -630,7 +647,7 @@ class Lower(ast.NodeTransformer):
     def two_ew(self, node, kd):
         """2-D f32 / int32 arrays have construction, indexing, rows, .T, ==, tobytes and ta.matmul (fdarr2); the rest is
         refused by name."""
-        no(node, 'element-wise operations and reductions on a 2-D %s array are not built (2-D f64 has them)' % dname(kd),
+        no(node, 'element-wise operations and reductions on a 2-D %s array are not built (2-D f64 and f32 have them)' % dname(kd),
            'work on one row: M[i] (a 1-D %s array), or use ta.matmul' % dname(kd))
 
     def truth(self, test):
@@ -1154,8 +1171,8 @@ class Lower(ast.NodeTransformer):
         kd = self.k(node.operand)
         if kd in ARR:
             if isinstance(node.op, ast.USub):
-                if kd == 'MF':
-                    return call('_ail_tam_neg', self.visit(node.operand))
+                if kd in EW2:
+                    return call(PK[kd] + 'neg', self.visit(node.operand))
                 if kd in TWO:
                     self.two_ew(node, kd)
                 if kd in ('AF', 'AS'):
@@ -1181,9 +1198,9 @@ class Lower(ast.NodeTransformer):
         if type(op) not in OPS:
             no(where, 'this operator on arrays (** and the bit operators are not built)', 'a loop over a.tolist()')
         code, sym = OPS[type(op)]
-        if lk in ('MS', 'MI') or rk in ('MS', 'MI'):
-            self.two_ew(where, lk if lk in TWO else rk)
-        if 'MF' in (lk, rk):
+        if lk == 'MI' or rk == 'MI':
+            self.two_ew(where, 'MI')
+        if lk in EW2 or rk in EW2:
             return self.arith2(left, lk, right, rk, code, sym, where, inplace)
         if lk in ARR:
             dt = lk[1]
@@ -1224,24 +1241,38 @@ class Lower(ast.NodeTransformer):
         return call(P[dt] + 'bin_s', a, x, const(code), const(True))
 
     def arith2(self, left, lk, right, rk, code, sym, where, inplace):
-        """An operator with a 2-D f64 array on one side: the other is a 2-D array of the same shape, or a number."""
-        if lk in ARR and rk in ARR and lk != rk:
-            no(where, 'a 2-D array and a 1-D or int32 array (a row broadcast is not built)',
-               'a loop over the rows: M[i] op row')
+        """An operator with a 2-D f64 or f32 array on one side: the other is a number, or an array of the same dtype whose
+        shape is the same or broadcasts (NumPy's rule on 1-D/2-D, job aicore1: a 1-D array is a row (1, n), a dimension
+        of 1 repeats). A 1-D operand becomes a 1-row matrix (`of1`) and the flag tells the error text it was 1-D."""
+        mk = lk if lk in TWO else rk
+        p = PK[mk]
         if sym in ('//', '%'):
-            no(where, '%s on f64 arrays' % sym, 'a loop over the elements')
-        if lk == 'MF':
+            no(where, '%s on %s arrays' % (sym, dname(mk)), 'a loop over the elements')
+        if lk in ARR and rk in ARR:
+            if inplace and lk not in TWO:
+                no(where, 'an in-place operator with a 1-D array on the left and a 2-D array on the right',
+                   'a new name: m = a %s M' % sym)
+            if lk[1] != rk[1]:
+                self.need_pure(left, 'a dtype mismatch')
+                self.need_pure(right, 'a dtype mismatch')
+                return call(p + 'te', const('ail_array: %s %s %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)'
+                                            % (dname(lk), sym, dname(rk), dname(rk), dname(lk))))
+            if lk not in TWO:
+                return call(p + 'bbin', call(p + 'of1', self.visit(left)), self.visit(right), const(code), const(1))
             a = self.visit(left)
-            if rk == 'MF':
-                return call('_ail_tam_' + ('ibin' if inplace else 'bin'), a, self.visit(right), const(code))
-            x = self.scalar(right, rk, 'F', 'operand')
+            if rk not in TWO:
+                return call(p + ('ibbin' if inplace else 'bbin'), a, call(p + 'of1', self.visit(right)), const(code), const(2))
+            return call(p + ('ibin' if inplace else 'bin'), a, self.visit(right), const(code))
+        if lk in TWO:
+            a = self.visit(left)
+            x = self.scalar(right, rk, mk[1], 'operand')
             if inplace:
-                return call('_ail_tam_ibin_s', a, x, const(code))
-            return call('_ail_tam_bin_s', a, x, const(code), const(False))
+                return call(p + 'ibin_s', a, x, const(code))
+            return call(p + 'bin_s', a, x, const(code), const(False))
         if inplace:
             no(where, 'an in-place operator with an array on the right', 'a = a op b')
-        x = self.scalar(left, lk, 'F', 'operand')
-        return call('_ail_tam_bin_s', self.visit(right), x, const(code), const(True))
+        x = self.scalar(left, lk, mk[1], 'operand')
+        return call(p + 'bin_s', self.visit(right), x, const(code), const(True))
 
     def visit_Compare(self, node):
         kinds = [self.k(node.left)] + [self.k(c) for c in node.comparators]
@@ -1359,8 +1390,8 @@ class Lower(ast.NodeTransformer):
                 return node
             if f.id == 'abs' and len(node.args) == 1 and not node.keywords:
                 kd = self.k(node.args[0])
-                if kd == 'MF':
-                    return call('_ail_tam_abs', self.visit(node.args[0]))
+                if kd in EW2:
+                    return call(PK[kd] + 'abs', self.visit(node.args[0]))
                 if kd in TWO:
                     self.two_ew(node, kd)
                 if kd in ('AF', 'AS'):
@@ -1563,13 +1594,48 @@ class Lower(ast.NodeTransformer):
         return call(PK[MKIND[dt]] + 'from', ast.List(elts=rows, ctx=ast.Load()))
 
     def module_call_mf(self, node, found, args, a, kd):
-        if kd != 'MF' and found in ('sqrt', 'exp', 'log', 'tanh', 'minimum', 'maximum', 'clip'):
+        if kd not in EW2 and found in ('sqrt', 'exp', 'log', 'tanh', 'minimum', 'maximum', 'clip'):
             self.two_ew(node, kd)
+        if found in REDUCE and 'axis' in args:
+            return self.axis_reduce(node, found, args, a, kd)
         if found in ('sqrt', 'exp', 'log', 'tanh'):
-            return call('_ail_tam_fn', self.visit(a), const(('sqrt', 'exp', 'log', 'tanh').index(found)))
+            return call(PK[kd] + 'fn', self.visit(a), const(('sqrt', 'exp', 'log', 'tanh').index(found)))
         if found in ('minimum', 'maximum', 'clip'):
             return self.pick(node, found, args, kd)
         no(node, 'ta.%s of a 2-D array' % found, 'ta.%s(M[i]) on one row, or a loop' % found)
+
+    def axis_reduce(self, node, found, args, a, kd):
+        """ta.sum / min / max (keepdims too) / argmin / argmax with axis= of a 2-D f64 or f32 array (job aicore1): each row
+        (axis 1) or column (axis 0) is reduced by the 1-D function, so the bits are the 1-D ones."""
+        ax = args['axis']
+        axv = None
+        if isinstance(ax, ast.Constant) and type(ax.value) is int:
+            axv = ax.value
+        elif isinstance(ax, ast.UnaryOp) and isinstance(ax.op, ast.USub) and isinstance(ax.operand, ast.Constant) \
+                and type(ax.operand.value) is int:
+            axv = -ax.operand.value
+        if axv not in (0, 1, -1, -2):
+            no(ax, 'axis= that is not the literal 0 or 1 (or -2, -1)', 'ta.%s(M, axis=1)' % found)
+        keep = args.get('keepdims')
+        if keep is not None and not (isinstance(keep, ast.Constant) and type(keep.value) is bool):
+            no(keep, 'keepdims= that is not the literal True or False', 'keepdims=True')
+        if 'acc' in args or 'order' in args:
+            no(node, 'acc= or order= together with axis=', 'ta.%s(M, axis=...) (the fixed order, the dtype accumulator)' % found)
+        if kd not in EW2:
+            no(node, 'ta.%s(axis=...) of a 2-D %s array (axis reductions are built for f64 and f32)' % (found, dname(kd)),
+               'ta.%s(M[i]) on one row' % found)
+        rows = const(1 if axv in (1, -1) else 0)
+        arr = self.visit(a)
+        p = PK[kd]
+        if found in ('argmin', 'argmax'):
+            return call(p + 'rarg', arr, rows, const(found == 'argmin'))
+        if found == 'sum':
+            out = call(p + 'rsum', arr, rows)
+        else:
+            out = call(p + 'rext', arr, rows, const(found == 'min'))
+        if keep is not None and keep.value:
+            return call(p + 'keep', out, rows)
+        return out
 
     def module_call(self, node, found):
         if found not in SIG:
@@ -1654,6 +1720,8 @@ class Lower(ast.NodeTransformer):
         dt = kd[1]
         if kd in TWO:
             return self.module_call_mf(node, found, args, a, kd)
+        if 'axis' in args or 'keepdims' in args:
+            no(node, 'ta.%s(axis=...) of a 1-D array (axis= is for 2-D arrays)' % found, 'ta.%s(a)' % found)
         if found in ('sqrt', 'exp', 'log', 'tanh'):
             if dt == 'I':
                 self.need_pure(a, 'ta.%s of an int32 array' % found)
@@ -1715,6 +1783,8 @@ class Lower(ast.NodeTransformer):
         if found == 'clip':
             if 'lo' not in args or 'hi' not in args:
                 no(node, 'ta.clip needs a, lo and hi', 'ta.clip(a, lo, hi)')
+            if kd not in TWO and (self.k(args['lo']) in TWO or self.k(args['hi']) in TWO):
+                no(node, 'ta.clip of a 1-D array with a 2-D bound', 'ta.minimum(ta.maximum(a, lo), hi)')
             inner = self.pick1(args['a'], args['lo'], False, kd, node, 'maximum')
             return self.pick_on(inner, args['hi'], True, kd, node, 'minimum')
         if 'b' not in args:
@@ -1728,7 +1798,14 @@ class Lower(ast.NodeTransformer):
         dt = kd[1]
         bk = self.k(b)
         if bk in ARR and (bk in TWO) != (kd in TWO):
-            no(node, 'ta.%s of a 2-D array and a 1-D or int32 array' % name, 'a loop over the rows')
+            mk = kd if kd in TWO else bk
+            if mk not in EW2 or bk[1] != dt:
+                no(node, 'ta.%s of a 2-D array and a 1-D array of another dtype' % name, 'a loop over the rows')
+            # one side 1-D: it is a row (1, n) of the broadcast (job aicore1)
+            p = PK[mk]
+            if kd in TWO:
+                return call(p + 'bpick', left, call(p + 'of1', self.visit(b)), const(smaller), const(2))
+            return call(p + 'bpick', call(p + 'of1', left), self.visit(b), const(smaller), const(1))
         if bk in ARR:
             if bk != kd:
                 return call('_ail_ta_te_' + MK[dt], const(
