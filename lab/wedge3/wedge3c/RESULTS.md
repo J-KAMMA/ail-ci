@@ -11,9 +11,9 @@ Libraries (pip-installed into venvs; never vendored):
 | `jellyfish` | 0.8.9 pure-Python fallback (`_jellyfish.py`; `*cjellyfish*` removed) | 1.1.0 (Rust) |
 | `msgpack` | 1.0.7 fallback (`MSGPACK_PUREPYTHON=1`) | 1.0.7 C extension (no Rust rewrite exists) |
 
-**Headline:** AIL's guarded hybrid selected **0 of 14 jellyfish functions and 0 of 35 msgpack units**,
-so it ran at CPython speed (0.98-0.99x) while PyPy was 3.3-5.4x and the native rewrite 10.5-14.1x
-faster.
+**Headline:** AIL's guarded hybrid selected **0 of the 6 jellyfish functions submitted to the build
+(0 of the module's 14) and 0 of 35 msgpack units**, so it ran at CPython speed (0.98-0.99x) while PyPy
+was 3.3-5.4x and the native rewrite 10.5-14.1x faster.
 
 ## 1. Results
 
@@ -26,9 +26,11 @@ Times are the median of 5 runs; every column's stdout and exit status matched CP
 | msgpack | 35 (3 module-level + 32 methods) | 0 | 2.223 | 0.673 | 2.209 | 2.211 | 0.157 | 0.994 | 3.282 | 14.056 |
 
 The sub-1.0 `hybrid/CPython` ratios are run-to-run noise: **no function was selected**, so the hybrid
-column is the unmodified pure library.  The native column is the only real speedup: 10.7x over CPython
-for jellyfish's Rust extension and 14.1x for msgpack's C extension.  PyPy needs no rewrite and gets
-5.5x and 3.3x respectively.
+column is the unmodified pure library.  The native column is the only real speedup: it is 10.7x faster
+than CPython for jellyfish's Rust extension and 14.1x for msgpack's C extension (the hybrid/native
+column says 10.5x and 14.1x).  PyPy needs no rewrite and is 5.47x (`2.893/0.529`) and 3.30x
+(`2.223/0.673`) faster than CPython; those CPython/PyPy ratios are not the hybrid/PyPy column, which is
+5.368 and 3.282 because the hybrid column is a hair faster than CPython.
 
 ### What observation changed
 
