@@ -1,3 +1,24 @@
+## 2026-11-10 -- fz246: a formatted negative NaN already matches CPython (job-fz246-11100948)
+
+The daily fuzzer (seed 2076623644) reported `line 23: cpython='inf       nan-' ail='inf      -nan-'`
+from `str(abs(v1)) + f'{(v1 / (abs(v1) + 1.0)):>10.1f}-'` after `v1` overflowed to infinity.  The
+difference does not reproduce on this tree: `bash ~/tools/cmp.sh /tmp/probes/fz246.py $PWD` reports
+`d same stdout`, and a build with `AIL_IR=1` also matches stdout and exit status 7.  The forced
+general build (`AIL_UNIFIED_FORCE=1`) refuses the full seed earlier by name at the `break` out of a
+`try`/`finally` protected region (unrelated to this line).  The cause is the one already fixed for
+fz208: glibc's `snprintf("%.*f")` writes a negative NaN as `-nan`, while CPython never shows a NaN's
+sign; `ail_fmt_spec_float` and both general-path `ail_obj_format` versions now pad the literal
+`nan`.  No compiler change was made.
+
+The minimized construct is the f-string of `v1 / (abs(v1) + 1.0)` after the loop overflows `v1`
+(`inf       nan-` on both builds).  Added `test_ail_fz246.py` (registered in `tests.d`) covering the
+minimized seed, both NaN signs, overflowed modulo/division, `f`/`F`/`E`/`G`/`%`/`+`/space/zero-pad
+forms, infinity, `-0.0`, and values reaching the format through an argument, a list item, an
+attribute and a dict value, on the default and `AIL_IR=1` builds.  No `DIFFERENCES.md` row in the
+new-difference sense: added a no-difference row `C?-job-fz246-11100948-1`.  Tests on this commit:
+`test_ail_fz246`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`; manifest
+`--check` clean.
+
 ## 2026-11-09 -- refuse1: first hybrid refusal for all 519 hot-module defs (job-refuse1-11091608)
 
 Measurement only; no compiler or library source changed. `lab/refuse1/measure.py` builds the same
